@@ -1,13 +1,11 @@
 pkgs: _: with pkgs; {
-  skeletonHaskellPackages = import ./haskell.nix {
+  cardanoMetadataSubmitterPackages = import ./haskell.nix {
     inherit
       config
       lib
       stdenv
       haskell-nix
       buildPackages
-      makeWrapper
-      jormungandr
-      cowsay;
+      makeWrapper;
   };
 }

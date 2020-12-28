@@ -6,21 +6,23 @@
 let
   sources = import ./sources.nix { inherit pkgs; }
     // sourcesOverride;
-  iohKNix = import sources.iohk-nix {};
-  haskellNix = import sources."haskell.nix";
+  iohkNix = import sources.iohk-nix {};
+  haskellNix = (import sources."haskell.nix" { inherit system sourcesOverride; }).nixpkgsArgs;
   # use our own nixpkgs if it exist in our sources,
   # otherwise use iohkNix default nixpkgs.
   nixpkgs = sources.nixpkgs or
-    (builtins.trace "Using IOHK default nixpkgs" iohKNix.nixpkgs);
+    (builtins.trace "Using IOHK default nixpkgs" iohkNix.nixpkgs);
 
   # for inclusion in pkgs:
   overlays =
     # Haskell.nix (https://github.com/input-output-hk/haskell.nix)
     haskellNix.overlays
     # haskell-nix.haskellLib.extra: some useful extra utility functions for haskell.nix
-    ++ iohKNix.overlays.haskell-nix-extra
+    ++ iohkNix.overlays.haskell-nix-extra
     # iohkNix: nix utilities and niv:
-    ++ iohKNix.overlays.iohkNix
+    ++ iohkNix.overlays.iohkNix
+    # iohkNix: cryptographic libraries:
+    ++ iohkNix.overlays.crypto
     # our own overlays:
     ++ [
       (pkgs: _: with pkgs; {
@@ -33,7 +35,7 @@ let
 
         # Example of using a package from iohk-nix
         # TODO: Declare packages required by the build.
-        inherit (iohkNix.jormungandrLib.packages.release) jormungandr;
+        # inherit (iohkNix.jormungandrLib.packages.release) jormungandr;
       })
       # Our haskell-nix-ified cabal project:
       (import ./pkgs.nix)

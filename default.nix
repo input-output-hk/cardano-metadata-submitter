@@ -1,5 +1,5 @@
 ############################################################################
-# iohk-skeleton Nix build
+# cardano-metadata-submitter Nix build
 #
 # fixme: document top-level attributes and how to build them
 #
@@ -11,7 +11,7 @@
 , config ? {}
 # allows to override dependencies of the project without modifications,
 # eg. to test build against local checkout of nixpkgs and iohk-nix:
-# nix build -f default.nix iohk-skeleton --arg sourcesOverride '{
+# nix build -f default.nix cardano-metadata-submitter --arg sourcesOverride '{
 #   iohk-nix = ../iohk-nix;
 #   nixpkgs  = ../nixpkgs;
 # }'
@@ -28,15 +28,15 @@ let
 
   haskellPackages = recRecurseIntoAttrs
     # the Haskell.nix package set, reduced to local packages.
-    (selectProjectPackages skeletonHaskellPackages);
+    (selectProjectPackages cardanoMetadataSubmitterPackages);
 
   self = {
     inherit haskellPackages check-hydra;
 
-    inherit (haskellPackages.iohk-skeleton.identifier) version;
+    inherit (haskellPackages.cardano-metadata-submitter.identifier) version;
     # Grab the executable component of our package.
-    inherit (haskellPackages.iohk-skeleton.components.exes)
-      iohk-skeleton;
+    inherit (haskellPackages.cardano-metadata-submitter.components.exes)
+      cardano-metadata-submitter;
 
     # `tests` are the test suites which have been built.
     tests = collectComponents' "tests" haskellPackages;

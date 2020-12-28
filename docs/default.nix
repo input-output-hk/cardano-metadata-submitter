@@ -4,7 +4,7 @@
 }:
 {
   example = stdenv.mkDerivation {
-    name = "iohk-skeleton-docs";
+    name = "cardano-metadata-submitter-docs";
     buildInputs = [ (texlive.combine {
                       inherit (texlive)
                         scheme-small
@@ -33,7 +33,7 @@
     buildPhase = "make";
 
     meta = with lib; {
-      description = "IOHK Skeleton Example Document";
+      description = "Cardano Metadata Submitter Example Document";
       license = licenses.asl20;
       platforms = platforms.linux;
     };

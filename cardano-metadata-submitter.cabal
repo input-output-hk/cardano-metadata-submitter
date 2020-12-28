@@ -1,13 +1,13 @@
 cabal-version:       2.2
-name:                iohk-skeleton
+name:                cardano-metadata-submitter
 version:             0.1.0.0
-synopsis:            Template project with reference CI setup
+synopsis:            A library and CLI for manipulating data for the Metadata Server CIP
 license:             Apache-2.0
 license-files:
   LICENSE
   NOTICE
-copyright:           2019 Input Output (Hong Kong) Ltd.
-author:              IOHK
+copyright:           2020 Input Output (Hong Kong) Ltd.
+author:              Obsidian Systems LLC
 maintainer:          operations@iohk.io
 
 flag development
@@ -16,11 +16,14 @@ flag development
     manual: True
 
 library
-  exposed-modules:     Skeleton
-  build-depends:       base ^>=4.12.0.0
-                     , cardano-prelude
-  hs-source-dirs:      src
-  default-language:    Haskell2010
+  exposed-modules: Cardano.Metadata.Types
+                 , Test.Cardano.Metadata.Types
+  build-depends: base ^>=4.12.0.0
+               , hspec
+               , text
+               , cardano-prelude
+  hs-source-dirs: src
+  default-language: Haskell2010
   default-extensions:
       NoImplicitPrelude
       OverloadedStrings
@@ -28,11 +31,11 @@ library
   if (!flag(development))
     ghc-options:         -Werror
 
-executable iohk-skeleton
-  main-is:             iohk-skeleton.hs
+executable cardano-metadata-submitter
+  main-is:             cardano-metadata-submitter.hs
   build-depends:       base ^>=4.12.0.0
                      , cardano-prelude
-                     , iohk-skeleton
+                     , cardano-metadata-submitter
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions:
@@ -58,18 +61,16 @@ test-suite unit
   build-depends:
       base
     , cardano-prelude
-    , iohk-skeleton
+    , cardano-metadata-submitter
     , hspec
-    , text
   type:
       exitcode-stdio-1.0
   hs-source-dirs:
       test/unit
   main-is:
       Main.hs
-  other-modules: SkeletonSpec
 
-benchmark iohk-skeleton-bench
+benchmark cardano-metadata-submitter-bench
   default-language:
       Haskell2010
   default-extensions:
@@ -86,7 +87,7 @@ benchmark iohk-skeleton-bench
       base
     , cardano-prelude
     , criterion
-    , iohk-skeleton
+    , cardano-metadata-submitter
   type:
      exitcode-stdio-1.0
   hs-source-dirs:

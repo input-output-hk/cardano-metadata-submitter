@@ -1,11 +1,11 @@
 ##
-## Makefile for iohk-skeleton example, based on:
+## Makefile for cardano-metadata-submitter example, based on:
 ##
 ## https://tex.stackexchange.com/questions/40738/how-to-properly-make-a-latex-project
 ##
 
 # Document name
-DOCNAME = iohk-skeleton
+DOCNAME = cardano-metadata-submitter
 
 # You want latexmk to *always* run, because make does not have all the info.
 # Also, include non-file targets in .PHONY so they are run regardless of any

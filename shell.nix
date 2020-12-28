@@ -11,21 +11,21 @@ with pkgs;
 let
   # This provides a development environment that can be used with nix-shell or
   # lorri. See https://input-output-hk.github.io/haskell.nix/user-guide/development/
-  shell = skeletonHaskellPackages.shellFor {
+  shell = cardanoMetadataSubmitterPackages.shellFor {
     name = "cabal-dev-shell";
 
     # If shellFor local packages selection is wrong,
     # then list all local packages then include source-repository-package that cabal complains about:
     #packages = ps: with ps; [
-    #  iohk-skeleton
+    #  cardano-metadata-submitter
     #  cardano-prelude
     #];
 
     # These programs will be available inside the nix-shell.
     buildInputs =
-      with haskellPackages; [ hlint stylish-haskell weeder ghcid lentil ]
+      with haskellPackages; [ hlint stylish-haskell weeder ghcid ]
       # TODO: Add your own packages to the shell.
-      ++ [ jormungandr ];
+      ++ [ ];
 
     # Prevents cabal from choosing alternate plans, so that
     # *all* dependencies are provided by Nix.
@@ -36,7 +36,7 @@ let
 
   devops = pkgs.stdenv.mkDerivation {
     name = "devops-shell";
-    buildInputs = [
+    buildInputs = with haskellPackages; [
       niv
     ];
     shellHook = ''

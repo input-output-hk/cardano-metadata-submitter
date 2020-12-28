@@ -8,11 +8,7 @@
 , buildPackages
 # Pass in any extra programs necessary for the build as function arguments.
 # TODO: Declare packages required by the build.
-# jormungandr and cowsay are just examples and should be removed for your
-# project, unless needed.
 , makeWrapper
-, jormungandr
-, cowsay
 
 , config ? {}
 # GHC attribute name
@@ -25,8 +21,8 @@ let
   # This creates the Haskell package set.
   # https://input-output-hk.github.io/haskell.nix/user-guide/projects/
   pkgSet = haskell-nix.cabalProject  {
-    src = haskell-nix.haskellLib.cleanGit { src = ../.; };
-    ghc = buildPackages.haskell-nix.compiler.${compiler};
+    src = haskell-nix.haskellLib.cleanGit { src = ../.; name = "cardano-metadata-submitter"; };
+    compiler-nix-name = compiler;
 
     # these extras will provide additional packages
     # ontop of the package set derived from cabal resolution.
@@ -38,32 +34,30 @@ let
 
     modules = [
       {
-        packages.iohk-skeleton.configureFlags = [ "--ghc-option=-Werror" ];
+        packages.cardano-metadata-submitter.configureFlags = [ "--ghc-option=-Werror" ];
         enableLibraryProfiling = profiling;
       }
 
       # Add dependencies
       {
-        packages.iohk-skeleton = {
-          components.tests.unit.build-tools = [ jormungandr ];
+        packages.cardano-metadata-submitter = {
+          components.tests.unit.build-tools = [ ];
 
           # How to set environment variables for builds
           #preBuild = "export NETWORK=testnet";
 
           # How to add program depdendencies for benchmarks
           # TODO: remove if not applicable
-          components.benchmarks.iohk-skeleton-bench = {
-            build-tools = [ makeWrapper ];
-            postInstall = ''
-              makeWrapper \
-                $out/bin/iohk-skeleton-bench \
-                $out/bin/iohk-skeleton-bench-wrapped \
-                --prefix PATH : ${cowsay}/bin
-            '';
-          };
+          # components.benchmarks.cardano-metadata-submitter-bench = {
+          #   build-tools = [ makeWrapper ];
+          #   postInstall = ''
+          #     makeWrapper \
+          #       $out/bin/cardano-metadata-submitter-bench \
+          #       $out/bin/cardano-metadata-submitter-bench-wrapped \
+          #       --prefix PATH : ${cowsay}/bin
+          #   '';
+          # };
 
-          # fixme: Workaround for https://github.com/input-output-hk/haskell.nix/issues/207
-          components.all.postInstall = lib.mkForce "";
         };
       }
 

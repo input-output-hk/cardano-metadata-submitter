@@ -8,7 +8,7 @@
 ############################################################################
 
 # The project sources
-{ iohk-skeleton ? { outPath = ./.; rev = "abcdef"; }
+{ cardano-metadata-submitter ? { outPath = ./.; rev = "abcdef"; }
 
 # Function arguments to pass to the project
 , projectArgs ? {
@@ -36,8 +36,8 @@ with (import pkgs.commonLib.release-lib) {
   inherit pkgs;
 
   inherit supportedSystems supportedCrossSystems scrubJobs projectArgs;
-  packageSet = import iohk-skeleton;
-  gitrev = iohk-skeleton.rev;
+  packageSet = import cardano-metadata-submitter;
+  gitrev = cardano-metadata-submitter.rev;
 };
 
 with pkgs.lib;
@@ -55,7 +55,7 @@ let
       collectTests jobs.native.checks.tests ++
       collectTests jobs.native.benchmarks ++
       # TODO: Add your project executables to this list
-      [ jobs.native.iohk-skeleton.x86_64-linux
+      [ jobs.native.cardano-metadata-submitter.x86_64-linux
       ]
     ))
   # Build the shell derivation in Hydra so that all its dependencies

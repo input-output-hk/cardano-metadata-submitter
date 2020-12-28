@@ -3,7 +3,7 @@ index-state: 2020-01-31T00:00:00Z
 packages:
   ./
 
-package iohk-skeleton
+package cardano-metadata-submitter
   ghc-options: -Wall -fwarn-redundant-constraints
 
 source-repository-package
