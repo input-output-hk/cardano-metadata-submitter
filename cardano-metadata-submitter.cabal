@@ -12,17 +12,23 @@ maintainer:          operations@iohk.io
 
 flag development
     description: Disable `-Werror`
-    default: False
+    default: True
     manual: True
 
 library
   exposed-modules: Cardano.Metadata.Types
+                 , Cardano.Metadata.GoguenRegistry
                  , Test.Cardano.Metadata.Types
+  other-modules: AesonHelpers
   build-depends: base ^>=4.12.0.0
                , aeson
+               , bytestring
+               , containers
                , cryptonite
+               , hex-text
                , hspec
                , text
+               , unordered-containers
                , cardano-prelude
                , cardano-crypto-class
   hs-source-dirs: src
