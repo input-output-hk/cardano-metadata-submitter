@@ -1,23 +1,23 @@
+{-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Cardano.Metadata.GoguenRegistry where
 
 import Cardano.Prelude
 
+import Control.Category
 import Control.Monad.Fail
 import qualified Data.Aeson as A
-import qualified Data.Aeson.Internal as AInternal
-import qualified Data.Aeson.Parser as A
 import qualified Data.Aeson.Types as A hiding (parseEither)
 import qualified Data.Text as T
 import qualified Text.Hex as T
 
 import Cardano.Crypto.DSIGN.Class
+import Cardano.Crypto.Hash
 
 import qualified AesonHelpers as A
 import Cardano.Metadata.Types
-
-import qualified Data.ByteString as BS
 
 -- | The goguen-metadata-registry as maintained by Cardano Foundation
 -- is a metadata server that expects entries to have these fields.
@@ -101,3 +101,24 @@ parseAnnotatedSignature f o = do
       rawDeserialiseSigDSIGN =<< T.decodeHex t
   A.noOtherFields "annotated signature" o ["publicKey", "signature"]
   pure $ f publicKey signature
+
+verifyPreimage
+  :: CompleteGoguenRegistryEntry
+  -> Either () ()
+verifyPreimage entry =
+  case T.decodeHex (unSubject (runIdentity (_goguenRegistryEntry_subject entry))) of
+    Nothing -> Left ()
+    Just subject -> do
+      let Identity preimage = _goguenRegistryEntry_preimage entry
+      hasher <- case _preimage_hashFn preimage of
+        fn | fn == "blake2b-256" -> Right $ hashToBytes . hashWith @Blake2b_256 id
+           | fn == "blake2b-224" -> Right $ hashToBytes . hashWith @Blake2b_224 id
+           | fn == "sha256" -> Right $ hashToBytes . hashWith @SHA256 id
+           | otherwise -> Left ()
+      case T.decodeHex (_preimage_preimage preimage) of
+        Nothing -> Left ()
+        Just preimageBytes -> do
+          case hasher preimageBytes == subject of
+            False -> Left ()
+            True -> pure ()
+

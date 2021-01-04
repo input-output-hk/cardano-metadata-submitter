@@ -19,6 +19,7 @@ library
   exposed-modules: Cardano.Metadata.Types
                  , Cardano.Metadata.GoguenRegistry
                  , Test.Cardano.Metadata.Types
+                 , Test.Cardano.Metadata.GoguenRegistry
   other-modules: AesonHelpers
   build-depends: base ^>=4.12.0.0
                , aeson
