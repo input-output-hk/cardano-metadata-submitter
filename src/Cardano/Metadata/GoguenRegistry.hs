@@ -24,13 +24,13 @@ import Cardano.Metadata.Types
 -- It is parameterized so that we can handle partially constructed entries.
 data GoguenRegistryEntry f = GoguenRegistryEntry
   { _goguenRegistryEntry_subject :: f Subject
-  , _goguenRegistryEntry_name :: f (Attested Name)
-  , _goguenRegistryEntry_description :: f (Attested Description)
+  , _goguenRegistryEntry_name :: f (Attested (WellKnown Name))
+  , _goguenRegistryEntry_description :: f (Attested (WellKnown Description))
   , _goguenRegistryEntry_preimage :: f Preimage
   -- ^ The preimage is not attested because it is directly verifiable.
   }
 
-deriving instance (Show (f Subject), Show (f (Attested Name)), Show (f (Attested Description)), Show (f Preimage)) => Show (GoguenRegistryEntry f)
+deriving instance (Show (f Subject), Show (f (Attested (WellKnown Name))), Show (f (Attested (WellKnown Description))), Show (f Preimage)) => Show (GoguenRegistryEntry f)
 
 type CompleteGoguenRegistryEntry = GoguenRegistryEntry Identity
 type PartialGoguenRegistryEntry = GoguenRegistryEntry Maybe
@@ -44,8 +44,8 @@ parseRegistryEntry = A.withObject "GoguenRegistryEntry" $ \o -> do
   descriptionField <- o A..: "description"
   preimageField <- o A..: "preImage"
   ownershipField <- o A..: "owner"
-  nameAnn <- parseWithAttestation parseWellKnown nameField
-  descAnn <- parseWithAttestation parseWellKnown descriptionField
+  nameAnn <- parseWithAttestation parseWellKnownGoguen nameField
+  descAnn <- parseWithAttestation parseWellKnownGoguen descriptionField
   preimage <- parseRegistryPreimage preimageField
   owner <- parseAnnotatedSignature OwnershipSignature ownershipField
   pure $ WithOwnership
@@ -58,6 +58,19 @@ parseRegistryEntry = A.withObject "GoguenRegistryEntry" $ \o -> do
     , _withOwnership_owner = owner
     }
 
+
+-- | The registry encodes "name" and "description" differently from the CIP.
+-- in particular `{ "value": "Foo" }` instead of `{ "value" : "\"Foo\"" }`.
+parseWellKnownGoguen
+  :: WellKnownProperty p
+  => A.Value
+  -> A.Parser (WellKnown p)
+parseWellKnownGoguen =
+  let parse t = case propertyValueFromString ("\"" <> t <> "\"") of
+        Left err -> fail (T.unpack err)
+        Right v -> WellKnown v <$> parseWellKnown v
+   in A.withText "property value" parse
+
 parseRegistryPreimage
   :: A.Value
   -> A.Parser Preimage
@@ -65,8 +78,8 @@ parseRegistryPreimage = A.withObject "preImage" $ \o -> do
   hashFn <- A.prependFailure "preimage " $
     o A..: "hashFn"
   preimage <- A.prependFailure "preimage " $
-    o A..: "hex"
-  A.noOtherFields "preimage" o ["hashFn", "hex"]
+    o A..: "value"
+  A.noOtherFields "preimage" o ["hashFn", "value"]
   pure $ Preimage
     { _preimage_hashFn = hashFn
     , _preimage_preimage = preimage
@@ -76,7 +89,7 @@ parseWithAttestation
   :: (A.Value -> A.Parser a)
   -> A.Value
   -> A.Parser (Attested a)
-parseWithAttestation parseValue = A.withObject "Property with Attestation" $ \o -> do
+parseWithAttestation parseValue = A.withObject "property with attestation" $ \o -> do
   value <- parseValue =<< o A..: "value"
   attestations <- (o A..: "anSignatures" >>=) $ A.withArray "Annotated Signatures" $
     fmap toList . mapM (A.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
@@ -122,3 +135,13 @@ verifyPreimage entry =
             False -> Left ()
             True -> pure ()
 
+verifyAttestations
+  :: CompleteGoguenRegistryEntry
+  -> Either [AttestationSignature] ()
+verifyAttestations entry = do
+  let Identity subject = _goguenRegistryEntry_subject entry
+      Identity name = _goguenRegistryEntry_name entry
+      Identity description = _goguenRegistryEntry_description entry
+  _ <- verifyAttested $ fmap (withWellKnown (hashesForAttestation subject)) name
+  _ <- verifyAttested $ fmap (withWellKnown (hashesForAttestation subject)) description
+  pure ()
