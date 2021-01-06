@@ -24,6 +24,7 @@ testParse = do
   Right parsed <- pure p
   print $ verifyPreimage (_withOwnership_value parsed)
   print $ verifyAttestations $ _withOwnership_value parsed
+  print $ verifyRegistryOwnership parsed
 
 testSubject :: Text
 testSubject = "9d6d2f903f80992106abe9ac38f121afd9f4305286834eb5f01e45752816b185"

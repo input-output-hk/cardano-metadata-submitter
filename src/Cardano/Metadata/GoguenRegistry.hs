@@ -10,7 +10,10 @@ import Control.Category
 import Control.Monad.Fail
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A hiding (parseEither)
+import qualified Data.Map as Map
+import Data.Tagged
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Text.Hex as T
 
 import Cardano.Crypto.DSIGN.Class
@@ -142,6 +145,37 @@ verifyAttestations entry = do
   let Identity subject = _goguenRegistryEntry_subject entry
       Identity name = _goguenRegistryEntry_name entry
       Identity description = _goguenRegistryEntry_description entry
-  _ <- verifyAttested $ fmap (withWellKnown (hashesForAttestation subject)) name
-  _ <- verifyAttested $ fmap (withWellKnown (hashesForAttestation subject)) description
+  _ <- verifyAttested $ fmap (flip withWellKnown (hashesForAttestation subject)) name
+  _ <- verifyAttested $ fmap (flip withWellKnown (hashesForAttestation subject)) description
   pure ()
+
+-- | The goguen metadata registry does something slightly different to compute the ownership hash.
+-- namely, it interprets the attestation signatures as hexademical strings and encodes them into UTF-8
+-- instead of hashing their bytestring representation direcctly.
+registryHashesForOwnership
+  :: Subject
+  -> Map Property (Attested PropertyValue)
+  -> HashesForOwnership
+registryHashesForOwnership s ps = HashesForOwnership
+  { _hashesForOwnership_subject = hashSubject s
+  , _hashesForOwnership_properties = flip Map.mapWithKey ps $ \p av ->
+      ( hashProperty p
+      , hashPropertyValue (_attested_property av)
+      , Map.fromList $ flip fmap (_attested_signatures av) $ \sig ->
+        ( Tagged (rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey sig))
+        , hashWith (T.encodeUtf8 . T.encodeHex . rawSerialiseSigDSIGN) (_attestationSignature_signature sig)
+        )
+      )
+  }
+
+verifyRegistryOwnership
+  :: WithOwnership CompleteGoguenRegistryEntry
+  -> Either (WithOwnership HashesForOwnership) ()
+verifyRegistryOwnership ownedEntry = verifyOwnership $ flip fmap ownedEntry $ \entry ->
+  let Identity subject = _goguenRegistryEntry_subject entry
+      Identity name = _goguenRegistryEntry_name entry
+      Identity description = _goguenRegistryEntry_description entry
+   in registryHashesForOwnership subject $ Map.fromList
+        [ withWellKnown (_attested_property name) $ \p _ -> (p, fmap _wellKnown_raw name)
+        , withWellKnown (_attested_property description) $ \p _ -> (p, fmap _wellKnown_raw description)
+        ]

@@ -30,7 +30,11 @@ module Cardano.Metadata.Types
   , Preimage (..)
   , OwnershipSignature (..)
   , HashesForOwnership (..)
+  , hashesForOwnership
+  , ownershipDigest
+  , makeOwnershipSignature
   , WithOwnership (..)
+  , verifyOwnership
   ) where
 
 import Cardano.Prelude
@@ -39,6 +43,8 @@ import Control.Category (id)
 import Control.Monad.Fail
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A hiding (parseEither)
+import qualified Data.Map as Map
+import Data.Tagged
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -96,10 +102,10 @@ makeAttestationSignature
   :: SignKeyDSIGN Ed25519DSIGN
   -> HashesForAttestation
   -> AttestationSignature
-makeAttestationSignature signingKey hfa = AttestationSignature
+makeAttestationSignature signingKey hashes = AttestationSignature
   { _attestationSignature_publicKey = deriveVerKeyDSIGN signingKey
   , _attestationSignature_signature = signDSIGN ()
-    (hashToBytes $ attestationDigest hfa)
+    (hashToBytes $ attestationDigest hashes)
     signingKey
   }
 
@@ -124,10 +130,10 @@ hashesForAttestation s p v = HashesForAttestation
 attestationDigest
   :: HashesForAttestation
   -> Hash Blake2b_256 HashesForAttestation
-attestationDigest hfa = castHash $ hashWith id $ mconcat
-  [ hashToBytes $ _hashesForAttestation_subject hfa
-  , hashToBytes $ _hashesForAttestation_property hfa
-  , hashToBytes $ _hashesForAttestation_value hfa
+attestationDigest hashes = castHash $ hashWith id $ mconcat
+  [ hashToBytes $ _hashesForAttestation_subject hashes
+  , hashToBytes $ _hashesForAttestation_property hashes
+  , hashToBytes $ _hashesForAttestation_value hashes
   ]
 
 -- | Metadata entries can be provided along with annotated signatures
@@ -180,10 +186,10 @@ parseWellKnown' =
 
 withWellKnown
   :: WellKnownProperty p
-  => (Property -> PropertyValue -> x)
-  -> WellKnown p
+  => WellKnown p
+  -> (Property -> PropertyValue -> x)
   -> x
-withWellKnown f p = f (wellKnownPropertyName p) (_wellKnown_raw p)
+withWellKnown p f = f (wellKnownPropertyName p) (_wellKnown_raw p)
 
 -- | "name" is a well-known property whose value must be a string
 newtype Name = Name { unName :: Text }
@@ -230,8 +236,8 @@ instance WellKnownProperty Preimage where
 -- | The goguen-metadata-registry determines ownership by signing entries
 -- with Ed25519.
 data OwnershipSignature = OwnershipSignature
-  { _OwnershipSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
-  , _OwnershipSignature_signature :: SigDSIGN Ed25519DSIGN
+  { _ownershipSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
+  , _ownershipSignature_signature :: SigDSIGN Ed25519DSIGN
   } deriving Show
 
 -- | Ownership signatures are hash( hash(subject)
@@ -249,13 +255,64 @@ data HashesForOwnership = HashesForOwnership
     Map Property
       ( Hash Blake2b_256 Property
       , Hash Blake2b_256 PropertyValue
-      , Map (VerKeyDSIGN Ed25519DSIGN)
-          (Hash Blake2b_256 (SignedDSIGN Ed25519DSIGN (Hash Blake2b_256 HashesForAttestation)))
+      , Map (Tagged (VerKeyDSIGN Ed25519DSIGN) ByteString)
+            (Hash Blake2b_256 (SigDSIGN Ed25519DSIGN))
       )
   } deriving Show
+
+hashesForOwnership
+  :: Subject
+  -> Map Property (Attested PropertyValue)
+  -> HashesForOwnership
+hashesForOwnership s ps = HashesForOwnership
+  { _hashesForOwnership_subject = hashSubject s
+  , _hashesForOwnership_properties = flip Map.mapWithKey ps $ \p av ->
+      ( hashProperty p
+      , hashPropertyValue (_attested_property av)
+      , Map.fromList $ flip fmap (_attested_signatures av) $ \sig ->
+        ( Tagged (rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey sig))
+        , hashWith rawSerialiseSigDSIGN (_attestationSignature_signature sig)
+        )
+      )
+  }
+
+ownershipDigest
+  :: HashesForOwnership
+  -> Hash Blake2b_256 HashesForOwnership
+ownershipDigest hashes = castHash $ hashWith id $ mconcat
+  [ hashToBytes $ _hashesForOwnership_subject hashes
+  , mconcat $ flip fmap (Map.toAscList (_hashesForOwnership_properties hashes)) $
+    \(_, (propertyHash, valueHash, keyHashes)) -> mconcat
+      [ hashToBytes $ propertyHash
+      , hashToBytes $ valueHash
+      , mconcat $ flip fmap (Map.toAscList keyHashes) $ \(_, sigHash) ->
+        hashToBytes sigHash
+      ]
+  ]
+
+makeOwnershipSignature
+  :: SignKeyDSIGN Ed25519DSIGN
+  -> HashesForOwnership
+  -> OwnershipSignature
+makeOwnershipSignature signingKey hashes = OwnershipSignature
+  { _ownershipSignature_publicKey = deriveVerKeyDSIGN signingKey
+  , _ownershipSignature_signature = signDSIGN ()
+    (hashToBytes $ ownershipDigest hashes)
+    signingKey
+  }
 
 data WithOwnership a = WithOwnership
   { _withOwnership_owner :: OwnershipSignature
   , _withOwnership_value :: a
-  } deriving Show
+  } deriving (Show, Functor)
 
+verifyOwnership
+  :: WithOwnership HashesForOwnership
+  -> Either (WithOwnership HashesForOwnership) ()
+verifyOwnership owned =
+  let owner = _withOwnership_owner owned
+      hashes = _withOwnership_value owned
+   in bimap (const owned) id $ verifyDSIGN ()
+        (_ownershipSignature_publicKey owner)
+        (hashToBytes (ownershipDigest hashes))
+        (_ownershipSignature_signature owner)

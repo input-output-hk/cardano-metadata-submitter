@@ -28,6 +28,7 @@ library
                , cryptonite
                , hex-text
                , hspec
+               , tagged
                , text
                , unordered-containers
                , cardano-prelude
