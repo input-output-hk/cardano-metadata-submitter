@@ -45,6 +45,8 @@ library
 executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
   build-depends:       base ^>=4.12.0.0
+                     , aeson
+                     , bytestring
                      , cardano-prelude
                      , cardano-metadata-submitter
   hs-source-dirs:      app
