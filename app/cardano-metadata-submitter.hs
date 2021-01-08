@@ -27,14 +27,15 @@ main = do
             exitFailure
 
     fileContents <- B.readFile filename
-    case decode fileContents of
+    record <- case decode fileContents of
         Just contents -> case parseEither parseRegistryEntry contents of
-            Right res -> do
-                print res
-                exitSuccess
+            Right res -> return res
             Left err -> do
                 hPutStrLn stderr $ "Parse error: " <> err
                 exitFailure
         Nothing -> do
             hPutStrLn stderr ("JSON parse error" :: String)
             exitFailure
+
+    writeFile filename $ show $ serializeRegistryEntry record 
+    exitSuccess
