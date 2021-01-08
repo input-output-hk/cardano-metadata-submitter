@@ -39,25 +39,44 @@ deriving instance (Show (f Subject), Show (f (Attested (WellKnown Name))), Show 
 type CompleteGoguenRegistryEntry = GoguenRegistryEntry Identity
 type PartialGoguenRegistryEntry = GoguenRegistryEntry Maybe
 
+completeToPartialRegistryEntry
+  :: CompleteGoguenRegistryEntry
+  -> PartialGoguenRegistryEntry
+completeToPartialRegistryEntry e = GoguenRegistryEntry
+  { _goguenRegistryEntry_subject = Just $ runIdentity $ _goguenRegistryEntry_subject e
+  , _goguenRegistryEntry_name = Just $ runIdentity $ _goguenRegistryEntry_name e
+  , _goguenRegistryEntry_description = Just $ runIdentity $ _goguenRegistryEntry_description e
+  , _goguenRegistryEntry_preimage = Just $ runIdentity $ _goguenRegistryEntry_preimage e
+  }
+
+partialToCompleteRegistryEntry
+  :: PartialGoguenRegistryEntry
+  -> Maybe CompleteGoguenRegistryEntry
+partialToCompleteRegistryEntry e = GoguenRegistryEntry
+  <$> fmap Identity (_goguenRegistryEntry_subject e)
+  <*> fmap Identity (_goguenRegistryEntry_name e)
+  <*> fmap Identity (_goguenRegistryEntry_description e)
+  <*> fmap Identity (_goguenRegistryEntry_preimage e)
+
 parseRegistryEntry
   :: A.Value
-  -> A.Parser (WithOwnership CompleteGoguenRegistryEntry)
+  -> A.Parser (WithOwnership Maybe PartialGoguenRegistryEntry)
 parseRegistryEntry = A.withObject "GoguenRegistryEntry" $ \o -> do
-  subject <- o A..: "subject"
-  nameField <- o A..: "name"
-  descriptionField <- o A..: "description"
-  preimageField <- o A..: "preImage"
-  ownershipField <- o A..: "owner"
-  nameAnn <- parseWithAttestation parseWellKnownGoguen nameField
-  descAnn <- parseWithAttestation parseWellKnownGoguen descriptionField
-  preimage <- parseRegistryPreimage preimageField
-  owner <- parseAnnotatedSignature OwnershipSignature ownershipField
+  subject <- o A..:? "subject"
+  nameField <- o A..:? "name"
+  descriptionField <- o A..:? "description"
+  preimageField <- o A..:? "preImage"
+  ownershipField <- o A..:? "owner"
+  nameAnn <- mapM (parseWithAttestation parseWellKnownGoguen) nameField
+  descAnn <- mapM (parseWithAttestation parseWellKnownGoguen) descriptionField
+  preimage <- mapM parseRegistryPreimage preimageField
+  owner <- mapM (parseAnnotatedSignature OwnershipSignature) ownershipField
   pure $ WithOwnership
     { _withOwnership_value = GoguenRegistryEntry
       { _goguenRegistryEntry_subject = Subject <$> subject
-      , _goguenRegistryEntry_name = Identity nameAnn
-      , _goguenRegistryEntry_description = Identity descAnn
-      , _goguenRegistryEntry_preimage = Identity preimage
+      , _goguenRegistryEntry_name = nameAnn
+      , _goguenRegistryEntry_description = descAnn
+      , _goguenRegistryEntry_preimage = preimage
       }
     , _withOwnership_owner = owner
     }
@@ -170,8 +189,8 @@ registryHashesForOwnership s ps = HashesForOwnership
   }
 
 verifyRegistryOwnership
-  :: WithOwnership CompleteGoguenRegistryEntry
-  -> Either (WithOwnership HashesForOwnership) ()
+  :: WithOwnership Identity CompleteGoguenRegistryEntry
+  -> Either () ()
 verifyRegistryOwnership ownedEntry = verifyOwnership $ flip fmap ownedEntry $ \entry ->
   let Identity subject = _goguenRegistryEntry_subject entry
       Identity name = _goguenRegistryEntry_name entry
@@ -182,19 +201,24 @@ verifyRegistryOwnership ownedEntry = verifyOwnership $ flip fmap ownedEntry $ \e
         ]
 
 serializeRegistryEntry
-  :: WithOwnership CompleteGoguenRegistryEntry
+  :: WithOwnership Maybe PartialGoguenRegistryEntry
   -> PP.Doc ann
-serializeRegistryEntry entry = encloseObj
-  [ objField "subject" $ PP.dquotes (PP.pretty subject)
-  , objField "preImage" $ encloseObj $
-    [ objField "value" $ PP.dquotes (PP.pretty (_preimage_preimage preimage))
-    , objField "hashFn" $ PP.dquotes (PP.pretty (_preimage_hashFn preimage))
-    ]
-  , objField "name" $ attested prettyWellKnown name
-  , objField "description" $ attested prettyWellKnown description
-  , objField "owner" $ ownership $ _withOwnership_owner entry
+serializeRegistryEntry entry = encloseObj $ catMaybes
+  [ flip fmap (_goguenRegistryEntry_subject entry') $ \subject -> objField "subject" $
+      PP.dquotes $ PP.pretty $ unSubject subject
+  , flip fmap (_goguenRegistryEntry_preimage entry') $ \preimage -> objField "preImage" $ encloseObj $
+      [ objField "value" $ PP.dquotes (PP.pretty (_preimage_preimage preimage))
+      , objField "hashFn" $ PP.dquotes (PP.pretty (_preimage_hashFn preimage))
+      ]
+  , flip fmap (_goguenRegistryEntry_name entry') $ \name -> objField "name" $
+      attested prettyWellKnown name
+  , flip fmap (_goguenRegistryEntry_description entry') $ \description -> objField "description" $
+      attested prettyWellKnown description
+  , flip fmap (_withOwnership_owner entry) $ \owner -> objField "owner" $
+      ownership owner
   ]
  where
+  entry' = _withOwnership_value entry
   prettyBytes = PP.dquotes . PP.pretty . T.encodeHex
   prettyWellKnown = PP.pretty . propertyValueToString . _wellKnown_raw
   encloseObj fs = PP.vcat
@@ -226,8 +250,3 @@ serializeRegistryEntry entry = encloseObj
       , objField "signature" $ prettyBytes $ rawSerialiseSigDSIGN $
         _ownershipSignature_signature s
       ]
-  entry' = _withOwnership_value entry
-  Identity (Subject subject) = _goguenRegistryEntry_subject entry'
-  Identity preimage = _goguenRegistryEntry_preimage entry'
-  Identity name = _goguenRegistryEntry_name entry'
-  Identity description = _goguenRegistryEntry_description entry'
