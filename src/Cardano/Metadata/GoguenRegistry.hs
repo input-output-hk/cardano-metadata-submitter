@@ -15,6 +15,7 @@ import Data.Tagged
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Text.Hex as T
+import qualified Prettyprinter as PP
 
 import Cardano.Crypto.DSIGN.Class
 import Cardano.Crypto.Hash
@@ -179,3 +180,54 @@ verifyRegistryOwnership ownedEntry = verifyOwnership $ flip fmap ownedEntry $ \e
         [ withWellKnown (_attested_property name) $ \p _ -> (p, fmap _wellKnown_raw name)
         , withWellKnown (_attested_property description) $ \p _ -> (p, fmap _wellKnown_raw description)
         ]
+
+serializeRegistryEntry
+  :: WithOwnership CompleteGoguenRegistryEntry
+  -> PP.Doc ann
+serializeRegistryEntry entry = encloseObj
+  [ objField "subject" $ PP.dquotes (PP.pretty subject)
+  , objField "preImage" $ encloseObj $
+    [ objField "value" $ PP.dquotes (PP.pretty (_preimage_preimage preimage))
+    , objField "hashFn" $ PP.dquotes (PP.pretty (_preimage_hashFn preimage))
+    ]
+  , objField "name" $ attested prettyWellKnown name
+  , objField "description" $ attested prettyWellKnown description
+  , objField "owner" $ ownership $ _withOwnership_owner entry
+  ]
+ where
+  prettyBytes = PP.dquotes . PP.pretty . T.encodeHex
+  prettyWellKnown = PP.pretty . propertyValueToString . _wellKnown_raw
+  encloseObj fs = PP.vcat
+    [ PP.nest 4 $ PP.vcat $ PP.lbrace : PP.punctuate PP.comma fs
+    , PP.rbrace
+    ]
+  encloseList xs = PP.vcat
+    [ PP.nest 4 $ PP.vcat $ PP.lbracket : PP.punctuate PP.comma xs
+    , PP.rbracket
+    ]
+  objField fieldName contents = PP.hsep
+    [ PP.dquotes fieldName <> PP.colon
+    , contents
+    ]
+  attested prettyValue a = encloseObj
+    [ objField "value" (prettyValue (_attested_property a))
+    , objField "anSignatures" $ encloseList $
+      fmap attestation $ _attested_signatures a
+    ]
+  attestation s = encloseObj
+    [ objField "publicKey" $ prettyBytes $ rawSerialiseVerKeyDSIGN $
+      _attestationSignature_publicKey s
+    , objField "signature" $ prettyBytes $ rawSerialiseSigDSIGN $
+      _attestationSignature_signature s
+    ]
+  ownership s = encloseObj
+      [ objField "publicKey" $ prettyBytes $ rawSerialiseVerKeyDSIGN $
+        _ownershipSignature_publicKey s
+      , objField "signature" $ prettyBytes $ rawSerialiseSigDSIGN $
+        _ownershipSignature_signature s
+      ]
+  entry' = _withOwnership_value entry
+  Identity (Subject subject) = _goguenRegistryEntry_subject entry'
+  Identity preimage = _goguenRegistryEntry_preimage entry'
+  Identity name = _goguenRegistryEntry_name entry'
+  Identity description = _goguenRegistryEntry_description entry'

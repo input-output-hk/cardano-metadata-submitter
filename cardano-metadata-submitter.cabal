@@ -28,6 +28,7 @@ library
                , cryptonite
                , hex-text
                , hspec
+               , prettyprinter
                , tagged
                , text
                , unordered-containers
