@@ -37,5 +37,5 @@ main = do
             hPutStrLn stderr ("JSON parse error" :: String)
             exitFailure
 
-    writeFile filename $ show $ serializeRegistryEntry record 
+    writeFile filename $ show (serializeRegistryEntry record) <> "\n"
     exitSuccess
