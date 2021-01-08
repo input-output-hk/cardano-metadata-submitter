@@ -15,6 +15,8 @@ import Cardano.Crypto.Hash
 import Cardano.Crypto.DSIGN
 import qualified Text.Hex as T
 import qualified Data.Text.Encoding as T
+import qualified Prettyprinter as PP
+import qualified Prettyprinter.Render.Text as PP
 
 testParse :: IO ()
 testParse = do
@@ -25,6 +27,10 @@ testParse = do
   print $ verifyPreimage (_withOwnership_value parsed)
   print $ verifyAttestations $ _withOwnership_value parsed
   print $ verifyRegistryOwnership parsed
+  BS.writeFile "test.json" $ T.encodeUtf8 $ mconcat
+    [ PP.renderStrict $ PP.layoutPretty PP.defaultLayoutOptions $ serializeRegistryEntry parsed
+    , "\n"
+    ]
 
 testSubject :: Text
 testSubject = "9d6d2f903f80992106abe9ac38f121afd9f4305286834eb5f01e45752816b185"
