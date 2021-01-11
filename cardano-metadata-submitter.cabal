@@ -51,6 +51,7 @@ executable cardano-metadata-submitter
                      , cardano-prelude
                      , cardano-metadata-submitter
                      , optparse-applicative
+                     , text
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions:
