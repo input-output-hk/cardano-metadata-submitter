@@ -2,29 +2,21 @@ import Cardano.Prelude
 import Cardano.Metadata.GoguenRegistry
 import Data.Aeson
 import Data.Aeson.Types
+import qualified Options.Applicative as OA
 import Prelude (String)
 import qualified Data.ByteString.Lazy as B
-import System.Console.ParseArgs
 
-data ArgumentIndex
-    = ArgumentIndexFilename
-    deriving (Show, Ord, Eq)
+data Arguments = Arguments
+  { _ArgumentsFilename :: String
+  }
+  deriving (Show, Eq)
 
-argInfo :: [Arg ArgumentIndex]
-argInfo =
-    [ Arg ArgumentIndexFilename Nothing Nothing (argDataRequired "filename" ArgtypeString) "filename"
-    ]
+argumentParser :: OA.Parser Arguments
+argumentParser = Arguments <$> OA.strArgument (OA.metavar "FILENAME")
 
 main :: IO ()
 main = do
-    let argStrictness = ArgsParseControl ArgsComplete ArgsSoftDash
-
-    args <- parseArgsIO argStrictness argInfo
-    filename <- case getArgString args ArgumentIndexFilename of
-        Just fname -> return fname
-        Nothing -> do
-            hPutStrLn stderr ("No filename provided" :: String)
-            exitFailure
+    Arguments filename <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
 
     fileContents <- B.readFile filename
     record <- case decode fileContents of

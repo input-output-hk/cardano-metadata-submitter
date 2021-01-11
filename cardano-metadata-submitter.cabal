@@ -50,7 +50,7 @@ executable cardano-metadata-submitter
                      , bytestring
                      , cardano-prelude
                      , cardano-metadata-submitter
-                     , parseargs
+                     , optparse-applicative
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions:
