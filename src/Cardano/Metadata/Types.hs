@@ -1,4 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -34,6 +36,7 @@ module Cardano.Metadata.Types
   , ownershipDigest
   , makeOwnershipSignature
   , WithOwnership (..)
+  , partialToCompleteOwnership
   , verifyOwnership
   ) where
 
@@ -301,18 +304,30 @@ makeOwnershipSignature signingKey hashes = OwnershipSignature
     signingKey
   }
 
-data WithOwnership a = WithOwnership
-  { _withOwnership_owner :: OwnershipSignature
+data WithOwnership f a = WithOwnership
+  { _withOwnership_owner :: f OwnershipSignature
   , _withOwnership_value :: a
-  } deriving (Show, Functor)
+  } deriving (Functor, Foldable, Traversable)
+
+deriving instance (Show (f OwnershipSignature), Show a) => Show (WithOwnership f a)
+
+partialToCompleteOwnership
+  :: WithOwnership Maybe a
+  -> Maybe (WithOwnership Identity a)
+partialToCompleteOwnership e = case _withOwnership_owner e of
+  Nothing -> Nothing
+  Just o -> Just $ WithOwnership
+    { _withOwnership_owner = Identity o
+    , _withOwnership_value = _withOwnership_value e
+    }
 
 verifyOwnership
-  :: WithOwnership HashesForOwnership
-  -> Either (WithOwnership HashesForOwnership) ()
-verifyOwnership owned =
-  let owner = _withOwnership_owner owned
-      hashes = _withOwnership_value owned
-   in bimap (const owned) id $ verifyDSIGN ()
-        (_ownershipSignature_publicKey owner)
-        (hashToBytes (ownershipDigest hashes))
-        (_ownershipSignature_signature owner)
+  :: WithOwnership Identity HashesForOwnership
+  -> Either () ()
+verifyOwnership owned = do
+  let hashes = _withOwnership_value owned
+      Identity owner = _withOwnership_owner owned
+  bimap (const ()) id $ verifyDSIGN ()
+    (_ownershipSignature_publicKey owner)
+    (hashToBytes (ownershipDigest hashes))
+    (_ownershipSignature_signature owner)
