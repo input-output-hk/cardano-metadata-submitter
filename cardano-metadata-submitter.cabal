@@ -48,6 +48,8 @@ executable cardano-metadata-submitter
   build-depends:       base ^>=4.12.0.0
                      , aeson
                      , bytestring
+                     , cardano-crypto-class
+                     , cardano-binary
                      , cardano-prelude
                      , cardano-metadata-submitter
                      , optparse-applicative
