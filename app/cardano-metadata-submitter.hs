@@ -60,19 +60,22 @@ combineRegistryEntries new old = GoguenRegistryEntry
 
 main :: IO ()
 main = do
-  Arguments filename skFname finalize newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
+  Arguments filename mskFname finalize newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
   let draftFilename = filename <> ".draft"
+
+  key :: Maybe (SignKeyDSIGN Ed25519DSIGN) <- forM mskFname $ \skFname -> do
+    lbs <- B.readFile skFname
+    dieOnLeft "Error reading key file" $ left show $ decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
 
   registryJSONDraft <- eitherDecodeFileStrict draftFilename
   registryJSON <- case registryJSONDraft of
     Right res -> return res
     Left err -> eitherDecodeFileStrict filename
 
-  WithOwnership owner record <- case registryJSON >>= parseEither parseRegistryEntry of
-    Right res -> return res
-    Left err -> do
-        hPutStrLn stderr $ "Parse error: " <> err
-        exitFailure
+  WithOwnership owner record <- dieOnLeft "Parse error" $ do
+    json <- registryJSON
+    parseEither parseRegistryEntry json
+
   let newRecordWithOwnership = WithOwnership owner $ combineRegistryEntries newEntryInfo record
 
   writeFile draftFilename $ show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
@@ -81,3 +84,8 @@ main = do
     DraftStatusDraft -> pure ()
 
   exitSuccess
+  where
+    dieOnLeft :: String -> Either String a -> IO a
+    dieOnLeft lbl eVal = case eVal of
+      Left err -> die $ T.pack $ lbl <> ": " <> err
+      Right val -> pure val
