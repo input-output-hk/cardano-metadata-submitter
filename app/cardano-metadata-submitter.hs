@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy as B
 
 data Arguments = Arguments
   { _ArgumentsFilename :: String
+  , _ArgumentsBackupFile :: Maybe String
   , _ArgumentsRegistryEntry :: GoguenRegistryEntry Maybe
   }
   deriving Show
@@ -31,6 +32,7 @@ withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do th
 argumentParser :: OA.Parser Arguments
 argumentParser = Arguments <$>
   OA.strArgument (OA.metavar "FILENAME") <*>
+  optional (OA.strOption (OA.long "backup" <> OA.short 'b' <> OA.metavar "BACKUP_FILE")) <*>
     (GoguenRegistryEntry
       <$> optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT"))
       <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
@@ -48,9 +50,10 @@ combineRegistryEntries new old = GoguenRegistryEntry
 
 main :: IO ()
 main = do
-    Arguments filename newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
+    Arguments filename mBackup newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
 
     fileContents <- B.readFile filename
+
     WithOwnership owner record <- case decode fileContents of
         Just contents -> case parseEither parseRegistryEntry contents of
             Right res -> return res
@@ -61,6 +64,9 @@ main = do
             hPutStrLn stderr ("JSON parse error" :: String)
             exitFailure
     let newRecordWithOwnership = WithOwnership owner $ combineRegistryEntries newEntryInfo record
+
+    forM_ mBackup $ \backupFilename -> do
+      B.writeFile backupFilename fileContents
 
     writeFile filename $ show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
     exitSuccess
