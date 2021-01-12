@@ -12,6 +12,7 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
 import Prelude (String, id)
+import System.Directory
 
 data DraftStatus = DraftStatusDraft | DraftStatusFinal
   deriving Show
@@ -73,10 +74,9 @@ main = do
         exitFailure
   let newRecordWithOwnership = WithOwnership owner $ combineRegistryEntries newEntryInfo record
 
-  let outputFiles = case finalize of
-        DraftStatusFinal -> [draftFilename, filename]
-        DraftStatusDraft -> [draftFilename]
+  writeFile draftFilename $ show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
+  case finalize of
+    DraftStatusFinal -> renameFile draftFilename filename
+    DraftStatusDraft -> pure ()
 
-  forM_ outputFiles $ \fn ->
-    writeFile draftFilename $ show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
   exitSuccess

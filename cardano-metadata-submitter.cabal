@@ -52,6 +52,7 @@ executable cardano-metadata-submitter
                      , cardano-binary
                      , cardano-prelude
                      , cardano-metadata-submitter
+                     , directory
                      , optparse-applicative
                      , text
   hs-source-dirs:      app
