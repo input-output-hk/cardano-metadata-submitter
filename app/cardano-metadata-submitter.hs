@@ -26,7 +26,7 @@ wellKnownOption strTransform opts = OA.option wellKnownReader opts where
 poorlyAttest :: a -> Attested a
 poorlyAttest v = Attested [] v
 
-withQuotes s = "\"" <> s <> "\"" -- XXX This is not the best way to do this part.
+withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do this part. I shall seek another.
 
 argumentParser :: OA.Parser Arguments
 argumentParser = Arguments <$>
@@ -35,7 +35,7 @@ argumentParser = Arguments <$>
       <$> optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT"))
       <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
       <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
-      <*> pure Nothing
+      <*> pure Nothing -- XXX To write
     )
 
 combineRegistryEntries :: GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe
