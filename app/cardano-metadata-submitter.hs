@@ -35,6 +35,7 @@ wellKnownOption strTransform opts = OA.option wellKnownReader opts where
 poorlyAttest :: a -> Attested a
 poorlyAttest v = Attested [] v
 
+withQuotes :: String -> String
 withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do this part. I shall seek another.
 
 argumentParser :: OA.Parser Arguments
