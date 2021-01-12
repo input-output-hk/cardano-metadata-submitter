@@ -1,11 +1,13 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 import Cardano.Prelude
 import Cardano.Metadata.GoguenRegistry
 import Cardano.Metadata.Types
+import Control.Arrow (left)
 import Data.Aeson
 import Data.Aeson.Types
-import Data.Text (unpack)
+import qualified Data.Text as T
 import qualified Options.Applicative as OA
-import Prelude (String)
+import Prelude (String, id) -- XXX Why NoImplicitPrelude??
 import qualified Data.ByteString.Lazy as B
 
 data Arguments = Arguments
@@ -14,18 +16,25 @@ data Arguments = Arguments
   }
   deriving Show
 
-wellKnownOption :: WellKnownProperty p => (Text -> p) -> OA.Mod OA.OptionFields Text -> OA.Parser (WellKnown p)
-wellKnownOption constr opts = asWellKnown <$> propertyValueOption where
-  propertyValueOption = OA.option (OA.eitherReader (left unpack . propertyValueFromString)) opts
-  asWellKnown pv@(PropertyValue txt _) = WellKnown pv $ constr txt
+wellKnownOption :: forall p. WellKnownProperty p => (String -> String) -> OA.Mod OA.OptionFields (WellKnown p) -> OA.Parser (WellKnown p)
+wellKnownOption strTransform opts = OA.option wellKnownReader opts where
+  wellKnownReader :: OA.ReadM (WellKnown p)
+  wellKnownReader = OA.eitherReader $ \str -> do
+    pv :: PropertyValue <- left T.unpack $ propertyValueFromString $ T.pack $ strTransform str
+    WellKnown pv <$> parseEither parseWellKnown pv
+
+poorlyAttest :: a -> Attested a
+poorlyAttest v = Attested [] v
+
+withQuotes s = "\"" <> s <> "\"" -- XXX This is not the best way to do this part.
 
 argumentParser :: OA.Parser Arguments
 argumentParser = Arguments <$>
   OA.strArgument (OA.metavar "FILENAME") <*>
     (GoguenRegistryEntry
-      <$> optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short "s" <> OA.metavar "SUBJECT"))
-      <*> optional (wellKnownOption Name (OA.long "name" <> OA.short "n" <> OA.metavar "NAME"))
-      <*> pure Nothing -- XXX
+      <$> optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT"))
+      <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
+      <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
       <*> pure Nothing
     )
 
