@@ -85,14 +85,14 @@ main = do
     lbs <- B.readFile skFname
     dieOnLeft "Error reading key file" $ left show $ decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
 
-  let draftFilename fn = fn <> ".draft"
+  let draftFilename (FileInfo fn _) = fn <> ".draft"
 
   registryJSON <- case inputInfo of
-    InputSourceFile (FileInfo fn _) -> do
-      registryJSONDraft <- eitherDecodeFileStrict $ draftFilename fn
-      case registryJSONDraft of
-        Right res -> return res
-        Left err -> eitherDecodeFileStrict fn
+    InputSourceFile fInfo -> do
+      let dfn = draftFilename fInfo
+      exists <- doesFileExist $ draftFilename fInfo
+      let readFn = if exists then dfn else _FileInfoFilename fInfo
+      eitherDecodeFileStrict readFn
     InputSourceStdin -> do
       input <- B.getContents
       pure $ eitherDecode input
@@ -105,10 +105,10 @@ main = do
       outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
   case inputInfo of
-    InputSourceFile (FileInfo fn finalize) -> do
-      writeFile (draftFilename fn) outputString
-      case finalize of
-        DraftStatusFinal -> renameFile (draftFilename fn) fn
+    InputSourceFile fInfo -> do
+      writeFile (draftFilename fInfo) outputString
+      case _FileInfoDraftStatus fInfo of
+        DraftStatusFinal -> renameFile (draftFilename fInfo) $ _FileInfoFilename fInfo
         DraftStatusDraft -> pure ()
     InputSourceStdin -> do
       putStr outputString
