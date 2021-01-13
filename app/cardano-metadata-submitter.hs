@@ -30,7 +30,8 @@ data FileInfo = FileInfo
 
 data Arguments = Arguments
   { _ArgumentsInputSource :: InputSource
-  , _ArgumentsSigningKeyFilename :: Maybe String
+  , _ArgumentsAttestationKeyFilename :: Maybe String
+  , _ArgumentsOwnershipKeyFilename :: Maybe String
   , _ArgumentsRegistryEntry :: PartialGoguenRegistryEntry
   }
   deriving Show
@@ -51,7 +52,8 @@ withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do th
 argumentParser :: OA.Parser Arguments
 argumentParser = Arguments <$>
   inputSourceArgumentParser <*>
-  optional (OA.strOption (OA.long "keyfile" <> OA.short 'k' <> OA.metavar "KEY_FILE")) <*>
+  optional (OA.strOption (OA.long "attest-keyfile" <> OA.short 'a' <> OA.metavar "ATTESTATION_KEY_FILE")) <*>
+  optional (OA.strOption (OA.long "owner-keyfile" <> OA.short 'o' <> OA.metavar "OWNER_KEY_FILE")) <*>
   goguenRegistryEntryParser where
     inputSourceArgumentParser :: OA.Parser InputSource
     inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'i') <|>
@@ -98,13 +100,15 @@ attestFields key old = do
     , _goguenRegistryEntry_description = attestField key subj <$> _goguenRegistryEntry_description old
     }
 
+ownerSignature :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String OwnershipSignature
+ownerSignature key reg = Left "Ownership signatures not yet supported" -- XXX
+
 main :: IO ()
 main = do
-  Arguments inputInfo mskFname newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
+  Arguments inputInfo attestKeyFile ownerKeyFile newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
 
-  key :: Maybe (SignKeyDSIGN Ed25519DSIGN) <- forM mskFname $ \skFname -> do
-    lbs <- B.readFile skFname
-    dieOnLeft "Error reading key file" $ left show $ decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
+  attestKey <- mapM readKeyFile attestKeyFile
+  ownerKey <- mapM readKeyFile ownerKeyFile
 
   let draftFilename (FileInfo fn _) = fn <> ".draft"
 
@@ -118,17 +122,21 @@ main = do
       input <- B.getContents
       pure $ eitherDecode input
 
-  WithOwnership owner record <- dieOnLeft "Parse error" $ do
+  WithOwnership oldOwner record <- dieOnLeft "Parse error" $ do
     json <- registryJSON
     parseEither parseRegistryEntry json
 
   let newRecord = combineRegistryEntries newEntryInfo record
 
-  newRecordWithAttestations <- dieOnLeft "Adding attestation" $ case key of
+  newRecordWithAttestations <- dieOnLeft "Adding attestation" $ case attestKey of
     Just k -> attestFields k newRecord
     Nothing -> pure newRecord
 
-  let newRecordWithOwnership = WithOwnership owner newRecordWithAttestations
+  newOwner <- dieOnLeft "Adding owner signature" $ case ownerKey of
+    Just k -> Just <$> ownerSignature k newRecordWithAttestations
+    Nothing -> pure oldOwner
+
+  let newRecordWithOwnership = WithOwnership newOwner newRecordWithAttestations
       outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
   case inputInfo of
@@ -146,3 +154,8 @@ main = do
     dieOnLeft lbl eVal = case eVal of
       Left err -> die $ T.pack $ lbl <> ": " <> err
       Right val -> pure val
+
+    readKeyFile :: FilePath -> IO (SignKeyDSIGN Ed25519DSIGN)
+    readKeyFile skFname = do
+      lbs <- B.readFile skFname
+      dieOnLeft "Error reading key file" $ left show $ decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
