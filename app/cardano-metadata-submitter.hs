@@ -17,11 +17,21 @@ import System.Directory
 data DraftStatus = DraftStatusDraft | DraftStatusFinal
   deriving Show
 
+data InputSource
+  = InputSourceFile FileInfo
+  | InputSourceStdin
+  deriving Show
+
+data FileInfo = FileInfo
+  { _FileInfoFilename :: String
+  , _FileInfoDraftStatus :: DraftStatus
+  }
+  deriving Show
+
 data Arguments = Arguments
-  { _ArgumentsFilename :: String
+  { _ArgumentsInputSource :: InputSource
   , _ArgumentsSigningKeyFilename :: Maybe String
-  , _ArgumentsFinalize :: DraftStatus
-  , _ArgumentsRegistryEntry :: GoguenRegistryEntry Maybe
+  , _ArgumentsRegistryEntry :: PartialGoguenRegistryEntry
   }
   deriving Show
 
@@ -40,15 +50,24 @@ withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do th
 
 argumentParser :: OA.Parser Arguments
 argumentParser = Arguments <$>
-  OA.strArgument (OA.metavar "FILENAME") <*>
+  inputSourceArgumentParser <*>
   optional (OA.strOption (OA.long "keyfile" <> OA.short 'k' <> OA.metavar "KEY_FILE")) <*>
-  OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f') <*>
-    (GoguenRegistryEntry
-      <$> optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT"))
-      <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
-      <*> optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
-      <*> pure Nothing -- XXX To write
-    )
+  goguenRegistryEntryParser where
+    inputSourceArgumentParser :: OA.Parser InputSource
+    inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'i') <|>
+      (InputSourceFile <$> fileInfoArgumentParser)
+
+    fileInfoArgumentParser :: OA.Parser FileInfo
+    fileInfoArgumentParser = FileInfo <$>
+      OA.strArgument (OA.metavar "FILENAME") <*>
+      OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f')
+
+    goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
+    goguenRegistryEntryParser = GoguenRegistryEntry <$>
+      optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT")) <*>
+      optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME")) <*>
+      optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION")) <*>
+      pure Nothing -- XXX To write
 
 combineRegistryEntries :: GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe
 combineRegistryEntries new old = GoguenRegistryEntry
@@ -60,28 +79,39 @@ combineRegistryEntries new old = GoguenRegistryEntry
 
 main :: IO ()
 main = do
-  Arguments filename mskFname finalize newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
-  let draftFilename = filename <> ".draft"
+  Arguments inputInfo mskFname newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
 
   key :: Maybe (SignKeyDSIGN Ed25519DSIGN) <- forM mskFname $ \skFname -> do
     lbs <- B.readFile skFname
     dieOnLeft "Error reading key file" $ left show $ decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
 
-  registryJSONDraft <- eitherDecodeFileStrict draftFilename
-  registryJSON <- case registryJSONDraft of
-    Right res -> return res
-    Left err -> eitherDecodeFileStrict filename
+  let draftFilename fn = fn <> ".draft"
+
+  registryJSON <- case inputInfo of
+    InputSourceFile (FileInfo fn _) -> do
+      registryJSONDraft <- eitherDecodeFileStrict $ draftFilename fn
+      case registryJSONDraft of
+        Right res -> return res
+        Left err -> eitherDecodeFileStrict fn
+    InputSourceStdin -> do
+      input <- B.getContents
+      pure $ eitherDecode input
 
   WithOwnership owner record <- dieOnLeft "Parse error" $ do
     json <- registryJSON
     parseEither parseRegistryEntry json
 
   let newRecordWithOwnership = WithOwnership owner $ combineRegistryEntries newEntryInfo record
+      outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
-  writeFile draftFilename $ show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
-  case finalize of
-    DraftStatusFinal -> renameFile draftFilename filename
-    DraftStatusDraft -> pure ()
+  case inputInfo of
+    InputSourceFile (FileInfo fn finalize) -> do
+      writeFile (draftFilename fn) outputString
+      case finalize of
+        DraftStatusFinal -> renameFile (draftFilename fn) fn
+        DraftStatusDraft -> pure ()
+    InputSourceStdin -> do
+      putStr outputString
 
   exitSuccess
   where
