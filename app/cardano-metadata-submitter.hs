@@ -77,6 +77,22 @@ combineRegistryEntries new old = GoguenRegistryEntry
   , _goguenRegistryEntry_preimage = _goguenRegistryEntry_preimage new <|> _goguenRegistryEntry_preimage old
   }
 
+attestField :: WellKnownProperty p => SignKeyDSIGN Ed25519DSIGN -> Subject -> Attested (WellKnown p) -> Attested (WellKnown p)
+attestField key subj (Attested att wk@(WellKnown raw structed)) = Attested attestations wk where
+  wkHash = hashesForAttestation subj (wellKnownPropertyName (Identity structed)) raw
+  newAttestationSig = makeAttestationSignature key wkHash
+  attestations = newAttestationSig:att
+
+attestFields :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String PartialGoguenRegistryEntry
+attestFields key old = do
+  subj <- case _goguenRegistryEntry_subject old of
+    Just subj -> pure subj
+    Nothing -> Left "Cannot attest without a subject record"
+  pure $ old
+    { _goguenRegistryEntry_name = attestField key subj <$> _goguenRegistryEntry_name old
+    , _goguenRegistryEntry_description = attestField key subj <$> _goguenRegistryEntry_description old
+    }
+
 main :: IO ()
 main = do
   Arguments inputInfo mskFname newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
@@ -101,7 +117,13 @@ main = do
     json <- registryJSON
     parseEither parseRegistryEntry json
 
-  let newRecordWithOwnership = WithOwnership owner $ combineRegistryEntries newEntryInfo record
+  let newRecord = combineRegistryEntries newEntryInfo record
+
+  newRecordWithAttestations <- dieOnLeft "Adding attestation" $ case key of
+    Just k -> attestFields k newRecord
+    Nothing -> pure newRecord
+
+  let newRecordWithOwnership = WithOwnership owner newRecordWithAttestations
       outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
   case inputInfo of
