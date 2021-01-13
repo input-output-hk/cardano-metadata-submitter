@@ -28,6 +28,7 @@ import Cardano.Metadata.Types
 -- It is parameterized so that we can handle partially constructed entries.
 data GoguenRegistryEntry f = GoguenRegistryEntry
   { _goguenRegistryEntry_subject :: f Subject
+  -- ^ The subject is not separately attested because it is signed in all attestations
   , _goguenRegistryEntry_name :: f (Attested (WellKnown Name))
   , _goguenRegistryEntry_description :: f (Attested (WellKnown Description))
   , _goguenRegistryEntry_preimage :: f Preimage

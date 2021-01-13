@@ -67,7 +67,12 @@ argumentParser = Arguments <$>
       optional (Subject <$> OA.strOption (OA.long "subject" <> OA.short 's' <> OA.metavar "SUBJECT")) <*>
       optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME")) <*>
       optional (poorlyAttest <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION")) <*>
-      pure Nothing -- XXX To write
+      optional preimageParser
+
+    preimageParser :: OA.Parser Preimage
+    preimageParser = Preimage <$>
+      (T.pack <$> OA.strOption (OA.long "hashFn" <> OA.short 'H' <> OA.metavar "HASH_FUNCTION")) <*>
+      (T.pack <$> OA.strOption (OA.long "preimage" <> OA.short 'p' <> OA.metavar "PREIMAGE"))
 
 combineRegistryEntries :: GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe
 combineRegistryEntries new old = GoguenRegistryEntry
