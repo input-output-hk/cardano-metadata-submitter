@@ -1,3 +1,6 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 module Test.Cardano.Metadata.GoguenRegistry where
 
@@ -10,13 +13,48 @@ import qualified Data.ByteString as BS
 import Cardano.Metadata.GoguenRegistry
 import Cardano.Metadata.Types
 
-import Control.Category
 import Cardano.Crypto.Hash
 import Cardano.Crypto.DSIGN
 import qualified Text.Hex as T
+import Data.Some
+import Data.Tagged
 import qualified Data.Text.Encoding as T
 import qualified Prettyprinter as PP
 import qualified Prettyprinter.Render.Text as PP
+import Test.Tasty.QuickCheck hiding (Property)
+
+import Test.Cardano.Metadata.Types
+
+genSupportedPreimageHash :: Gen (Some SupportedPreimageHash)
+genSupportedPreimageHash = suchThatMap (choose @Int (0, 2)) $ \i -> case i of
+  0 -> Just $ Some $ SupportedPreimageHash_Blake2b_256
+  1 -> Just $ Some $ SupportedPreimageHash_Blake2b_224
+  2 -> Just $ Some $ SupportedPreimageHash_SHA256
+  _ -> Nothing
+
+genSubjectWithPreimage
+  :: forall h. HashAlgorithm h
+  => SupportedPreimageHash h
+  -> Gen (Subject, Preimage)
+genSubjectWithPreimage h = do
+  (pretext, Tagged subject) <- genHashSubject @h
+  pure $ (,) subject $ Preimage
+    { _preimage_preimage = pretext
+    , _preimage_hashFn = toHashFnIdentifier h
+    }
+
+genCompleteEntry :: Gen CompleteGoguenRegistryEntry
+genCompleteEntry = do
+  hashFn <- genSupportedPreimageHash
+  (subject, preimage) <- withSupportedPreimageHash hashFn genSubjectWithPreimage
+  name <- genName
+  description <- genDescription
+  pure $ GoguenRegistryEntry
+    { _goguenRegistryEntry_subject = Identity subject
+    , _goguenRegistryEntry_name = Identity $ emptyAttested name
+    , _goguenRegistryEntry_description = Identity $ emptyAttested description
+    , _goguenRegistryEntry_preimage = Identity $ preimage
+    }
 
 testParse :: IO ()
 testParse = do
@@ -35,27 +73,4 @@ testParse = do
     , "\n"
     ]
 
-testSubject :: Text
-testSubject = "9d6d2f903f80992106abe9ac38f121afd9f4305286834eb5f01e45752816b185"
-
-testProperty :: Text
-testProperty = "name"
-
-testValue :: Text
-testValue = "\"example name a\""
-
-testHash :: Hash Blake2b_256 ByteString
-testHash = hashWith id $ mconcat $ fmap hashToBytes
-  [ hashWith @ Blake2b_256 T.encodeUtf8 testSubject
-  , hashWith T.encodeUtf8 testProperty
-  , hashWith T.encodeUtf8 testValue
-  ]
-
-testSignature = verifyDSIGN () verKey (hashToBytes testHash) sig
-
-verKey :: VerKeyDSIGN Ed25519DSIGN
-Just verKey = rawDeserialiseVerKeyDSIGN =<< T.decodeHex "0334c6056068b372494220479d7d9af6c4d33bd643d884e7f6d50f73c3d607d3"
-
-sig :: SigDSIGN Ed25519DSIGN
-Just sig = rawDeserialiseSigDSIGN =<< T.decodeHex "601652d82d057d399ef86dc4028b279fa851005c9e9ec7894bf219a7f15eb32d8affa9a6bf46554329bef79fbcb930df802c16bc8c695924e1a36a3afa921004"
 

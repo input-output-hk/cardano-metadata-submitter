@@ -21,6 +21,7 @@ module Cardano.Metadata.Types
   , hashesForAttestation
   , attestationDigest
   , Attested (..)
+  , emptyAttested
   , isAttestedBy
   , verifyAttested
   , WellKnownProperty (..)
@@ -146,6 +147,14 @@ data Attested a = Attested
   , _attested_property :: a
   } deriving (Functor, Show)
 
+emptyAttested
+  :: a
+  -> Attested a
+emptyAttested a = Attested
+  { _attested_signatures = []
+  , _attested_property = a
+  }
+
 isAttestedBy
   :: HashesForAttestation
   -> AttestationSignature
@@ -165,6 +174,7 @@ verifyAttested attested =
         [] -> Right ()
         _ -> Left invalids
 
+-- TODO: Add a tag type that allows all well known properties to be enumerated
 class WellKnownProperty p where
   wellKnownPropertyName :: f p -> Property
   parseWellKnown :: PropertyValue -> A.Parser p
