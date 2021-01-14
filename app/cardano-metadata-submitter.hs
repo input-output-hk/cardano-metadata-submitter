@@ -9,6 +9,7 @@ import Control.Arrow (left)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as B
+import Data.List (isSuffixOf)
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
 import Prelude (String, id)
@@ -73,9 +74,14 @@ argumentParser = Arguments <$>
 
     fileInfoArgumentParser :: OA.Parser FileInfo
     fileInfoArgumentParser = FileInfo <$>
-      OA.strArgument (OA.metavar "SUBJECT") <*>
-      OA.flag EntryOperationInitialize EntryOperationRevise (OA.long "init" <> OA.short 'i') <*>
+      (trimSubject <$> OA.strArgument (OA.metavar "SUBJECT")) <*>
+      OA.flag EntryOperationRevise EntryOperationInitialize (OA.long "init" <> OA.short 'i') <*>
       OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f')
+
+    trimSubject :: String -> String
+    trimSubject subj = if ".json" `isSuffixOf` subj
+      then take (length subj - 5) subj
+      else subj
 
     goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
     goguenRegistryEntryParser = GoguenRegistryEntry <$>
