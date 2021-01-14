@@ -103,8 +103,9 @@ combineRegistryEntries new old = GoguenRegistryEntry
   , _goguenRegistryEntry_preimage = _goguenRegistryEntry_preimage new <|> _goguenRegistryEntry_preimage old
   } where
     combineAttestedEntry a b = case (a, b) of
-      -- (Just (Attested sigA valA), Just (Attested sigB valB)) | valA == valB -> Just $ Attested (sigA ++ sigB) valA
+      (Just (Attested sigA valA), Just (Attested sigB valB)) | raw valA == raw valB -> Just $ Attested (sigA ++ sigB) valA
       _ -> a <|> b
+    raw (WellKnown (PropertyValue r _) _) = r
 
 attestField :: WellKnownProperty p => SignKeyDSIGN Ed25519DSIGN -> Subject -> Attested (WellKnown p) -> Attested (WellKnown p)
 attestField key subj (Attested att wk@(WellKnown raw structed)) = Attested attestations wk where
