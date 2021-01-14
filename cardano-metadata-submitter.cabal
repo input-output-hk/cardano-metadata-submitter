@@ -27,82 +27,68 @@ library
                , containers
                , cryptonite
                , hex-text
-               , hspec
                , prettyprinter
+               , some
                , tagged
+               , tasty-quickcheck
                , text
                , unordered-containers
                , cardano-prelude
                , cardano-crypto-class
   hs-source-dirs: src
   default-language: Haskell2010
-  default-extensions:
-      NoImplicitPrelude
-      OverloadedStrings
-
+  default-extensions: NoImplicitPrelude
+                      OverloadedStrings
   if (!flag(development))
-    ghc-options:         -Werror
+    ghc-options: -Werror
 
 executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
-  build-depends:       base ^>=4.12.0.0
-                     , cardano-prelude
-                     , cardano-metadata-submitter
+  build-depends: base ^>=4.12.0.0
+               , cardano-prelude
+               , cardano-metadata-submitter
   hs-source-dirs:      app
   default-language:    Haskell2010
-  default-extensions:
-      NoImplicitPrelude
-      OverloadedStrings
-
+  default-extensions: NoImplicitPrelude
+                      OverloadedStrings
   if (!flag(development))
-    ghc-options:         -Werror
+    ghc-options: -Werror
 
 test-suite unit
-  default-language:
-      Haskell2010
-  default-extensions:
-      NoImplicitPrelude
-      OverloadedStrings
+  default-language: Haskell2010
+  default-extensions: NoImplicitPrelude
+                      OverloadedStrings
   ghc-options:
       -threaded -rtsopts
       -Wall
       -O2
+  build-depends: base
+               , cardano-prelude
+               , cardano-metadata-submitter
+               , tasty
+               , tasty-hunit
+               , tasty-quickcheck
+  type: exitcode-stdio-1.0
+  extra-source-files: test/examples/*
+  hs-source-dirs: test/unit
+  main-is: Main.hs
   if (!flag(development))
-    ghc-options:
-      -Werror
-  build-depends:
-      base
-    , cardano-prelude
-    , cardano-metadata-submitter
-    , hspec
-  type:
-      exitcode-stdio-1.0
-  hs-source-dirs:
-      test/unit
-  main-is:
-      Main.hs
+    ghc-options: -Werror
 
 benchmark cardano-metadata-submitter-bench
-  default-language:
-      Haskell2010
-  default-extensions:
-      NoImplicitPrelude
-      OverloadedStrings
+  default-language: Haskell2010
+  default-extensions: NoImplicitPrelude
+                      OverloadedStrings
   ghc-options:
       -threaded -rtsopts
       -Wall
       -O2
+  build-depends: base
+               , cardano-prelude
+               , criterion
+               , cardano-metadata-submitter
+  type: exitcode-stdio-1.0
+  hs-source-dirs: bench
+  main-is: Main.hs
   if (!flag(development))
-    ghc-options:
-      -Werror
-  build-depends:
-      base
-    , cardano-prelude
-    , criterion
-    , cardano-metadata-submitter
-  type:
-     exitcode-stdio-1.0
-  hs-source-dirs:
-      bench
-  main-is:
-      Main.hs
+    ghc-options: -Werror

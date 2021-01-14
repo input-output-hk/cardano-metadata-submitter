@@ -1,4 +1,7 @@
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -11,6 +14,7 @@ import Control.Monad.Fail
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A hiding (parseEither)
 import qualified Data.Map as Map
+import Data.Some
 import Data.Tagged
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
@@ -57,6 +61,41 @@ partialToCompleteRegistryEntry e = GoguenRegistryEntry
   <*> fmap Identity (_goguenRegistryEntry_name e)
   <*> fmap Identity (_goguenRegistryEntry_description e)
   <*> fmap Identity (_goguenRegistryEntry_preimage e)
+
+data SupportedPreimageHash h where
+  SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash Blake2b_256
+  SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash Blake2b_224
+  SupportedPreimageHash_SHA256 :: SupportedPreimageHash SHA256
+
+toHashFnIdentifier
+  :: SupportedPreimageHash h
+  -> Text
+toHashFnIdentifier = \case
+  SupportedPreimageHash_Blake2b_256 -> "blake2b-256"
+  SupportedPreimageHash_Blake2b_224 -> "blake2b-224"
+  SupportedPreimageHash_SHA256 -> "sha256"
+
+fromHashFnIdentifier
+  :: Text
+  -> Either () (Some SupportedPreimageHash)
+fromHashFnIdentifier fn
+  | fn == "blake2b-256" = Right $ Some $
+    SupportedPreimageHash_Blake2b_256
+  | fn == "blake2b-224" = Right $ Some $
+    SupportedPreimageHash_Blake2b_224
+  | fn == "sha256" = Right $ Some $
+    SupportedPreimageHash_SHA256
+  | otherwise = Left ()
+
+withSupportedPreimageHash
+  :: Some SupportedPreimageHash
+  -> (forall h. HashAlgorithm h => SupportedPreimageHash h -> x)
+  -> x
+withSupportedPreimageHash some k = case some of
+  Some sh -> case sh of
+    h@(SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) -> k h
+    h@(SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) -> k h
+    h@(SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) -> k h
 
 parseRegistryEntry
   :: A.Value
@@ -146,11 +185,15 @@ verifyPreimage entry =
     Nothing -> Left ()
     Just subject -> do
       let Identity preimage = _goguenRegistryEntry_preimage entry
-      hasher <- case _preimage_hashFn preimage of
-        fn | fn == "blake2b-256" -> Right $ hashToBytes . hashWith @Blake2b_256 id
-           | fn == "blake2b-224" -> Right $ hashToBytes . hashWith @Blake2b_224 id
-           | fn == "sha256" -> Right $ hashToBytes . hashWith @SHA256 id
-           | otherwise -> Left ()
+      hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
+        Right (Some h) -> Right $ case h of
+          (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
+            hashToBytes . hashWith @h id
+          (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
+            hashToBytes . hashWith @h id
+          (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
+            hashToBytes . hashWith @h id
+        Left () -> Left ()
       case T.decodeHex (_preimage_preimage preimage) of
         Nothing -> Left ()
         Just preimageBytes -> do
