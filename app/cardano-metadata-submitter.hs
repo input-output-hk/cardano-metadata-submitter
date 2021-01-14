@@ -56,7 +56,7 @@ argumentParser = Arguments <$>
   optional (OA.strOption (OA.long "owner-keyfile" <> OA.short 'o' <> OA.metavar "OWNER_KEY_FILE")) <*>
   goguenRegistryEntryParser where
     inputSourceArgumentParser :: OA.Parser InputSource
-    inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'i') <|>
+    inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'I') <|>
       (InputSourceFile <$> fileInfoArgumentParser)
 
     fileInfoArgumentParser :: OA.Parser FileInfo
