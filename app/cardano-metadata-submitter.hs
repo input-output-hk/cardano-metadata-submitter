@@ -1,6 +1,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 import Cardano.Binary
 import Cardano.Crypto.DSIGN
+import Cardano.Crypto.Seed
 import Cardano.Metadata.GoguenRegistry
 import Cardano.Metadata.Types
 import Cardano.Prelude
@@ -42,13 +44,24 @@ canonicalFilename fi = _FileInfoSubject fi <> ".json"
 draftFilename :: FileInfo -> String
 draftFilename fi = canonicalFilename fi <> ".draft"
 
-data Arguments = Arguments
-  { _ArgumentsInputSource :: InputSource
-  , _ArgumentsAttestationKeyFilename :: Maybe String
-  , _ArgumentsOwnershipKeyFilename :: Maybe String
-  , _ArgumentsRegistryEntry :: PartialGoguenRegistryEntry
+data EntryUpdateArguments = EntryUpdateArguments
+  { _EntryUpdateArgumentsInputSource :: InputSource
+  , _EntryUpdateArgumentsAttestationKeyFilename :: Maybe String
+  , _EntryUpdateArgumentsOwnershipKeyFilename :: Maybe String
+  , _EntryUpdateArgumentsRegistryEntry :: PartialGoguenRegistryEntry
   }
   deriving Show
+
+data KeyGenerationArguments = KeyGenerationArguments
+  { _keyGenerationArgumentsFileName :: String
+  }
+  deriving Show
+
+data Arguments
+  = ArgumentsEntryUpdate EntryUpdateArguments
+  | ArgumentsKeyGeneration KeyGenerationArguments
+  deriving Show
+
 
 wellKnownOption :: forall p. WellKnownProperty p => (String -> String) -> OA.Mod OA.OptionFields (WellKnown p) -> OA.Parser (WellKnown p)
 wellKnownOption strTransform opts = OA.option wellKnownReader opts where
@@ -63,8 +76,8 @@ poorlyAttest v = Attested [] v
 withQuotes :: String -> String
 withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do this part. I shall seek another.
 
-argumentParser :: OA.Parser Arguments
-argumentParser = Arguments <$>
+entryUpdateArgumentParser :: OA.Parser EntryUpdateArguments
+entryUpdateArgumentParser = EntryUpdateArguments <$>
   inputSourceArgumentParser <*>
   optional (OA.strOption (OA.long "attest-keyfile" <> OA.short 'a' <> OA.metavar "ATTESTATION_KEY_FILE")) <*>
   optional (OA.strOption (OA.long "owner-keyfile" <> OA.short 'o' <> OA.metavar "OWNER_KEY_FILE")) <*>
@@ -138,10 +151,8 @@ ownerSignature key reg = makeOwnershipSignature key <$> hashes where
   asEither _ (Just x) = Right x
   asEither s Nothing = Left $ "cannot hash with missing " <> s
 
-main :: IO ()
-main = do
-  Arguments inputInfo attestKeyFile ownerKeyFile newEntryInfo <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
-
+handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
+handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile ownerKeyFile newEntryInfo) = do
   attestKey <- mapM readKeyFile attestKeyFile
   ownerKey <- mapM readKeyFile ownerKeyFile
 
@@ -201,3 +212,37 @@ main = do
     parseJSON registryJSON = dieOnLeft "Parse error" $ do
       json <- registryJSON
       A.parseEither parseRegistryEntry json
+
+keyGenerationParser :: OA.Parser KeyGenerationArguments
+keyGenerationParser = KeyGenerationArguments <$>
+  OA.strOption (OA.long "generate-key" <> OA.short 'K' <> OA.metavar "KEY")
+
+
+handleKeyGeneration :: KeyGenerationArguments -> IO ()
+handleKeyGeneration (KeyGenerationArguments fname) = do
+  let pubKeyname = fname <> ".pub"
+      privKeyName = fname <> ".prv"
+
+      seedSize = seedSizeDSIGN (Proxy @Ed25519DSIGN)
+
+  seed <- readSeedFromSystemEntropy seedSize
+
+  let signKey = genKeyDSIGN seed
+      pubKey = deriveVerKeyDSIGN @Ed25519DSIGN signKey
+
+  writeKeyFile pubKeyname $ encodeVerKeyDSIGN @Ed25519DSIGN pubKey
+  writeKeyFile privKeyName $ encodeSignKeyDSIGN @Ed25519DSIGN signKey
+  where
+    writeKeyFile :: FilePath -> Encoding -> IO ()
+    writeKeyFile fname enc = B.writeFile fname $ serializeEncoding enc
+
+argumentParser :: OA.Parser Arguments
+argumentParser = (ArgumentsEntryUpdate <$> entryUpdateArgumentParser) <|>
+  (ArgumentsKeyGeneration <$> keyGenerationParser)
+
+main :: IO ()
+main = do
+  args <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
+  case args of
+    ArgumentsEntryUpdate eua -> handleEntryUpdateArguments eua
+    ArgumentsKeyGeneration ka -> handleKeyGeneration ka
