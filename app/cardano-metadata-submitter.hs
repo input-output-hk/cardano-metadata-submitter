@@ -18,6 +18,7 @@ import qualified Data.Text as T
 import qualified Options.Applicative as OA
 import Prelude (String, id)
 import System.Directory (doesFileExist, renameFile)
+import System.Environment (lookupEnv)
 
 data DraftStatus = DraftStatusDraft | DraftStatusFinal
   deriving Show
@@ -77,8 +78,8 @@ poorlyAttest v = Attested [] v
 withQuotes :: String -> String
 withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do this part. I shall seek another.
 
-entryUpdateArgumentParser :: OA.Parser EntryUpdateArguments
-entryUpdateArgumentParser = EntryUpdateArguments <$>
+entryUpdateArgumentParser :: Maybe String -> OA.Parser EntryUpdateArguments
+entryUpdateArgumentParser defaultSubject = EntryUpdateArguments <$>
   inputSourceArgumentParser <*>
   optional (OA.strOption (OA.long "attest-keyfile" <> OA.short 'a' <> OA.metavar "ATTESTATION_KEY_FILE")) <*>
   optional (OA.strOption (OA.long "owner-keyfile" <> OA.short 'o' <> OA.metavar "OWNER_KEY_FILE")) <*>
@@ -89,9 +90,13 @@ entryUpdateArgumentParser = EntryUpdateArguments <$>
 
     fileInfoArgumentParser :: OA.Parser FileInfo
     fileInfoArgumentParser = FileInfo <$>
-      (trimSubject <$> OA.strArgument (OA.metavar "SUBJECT")) <*>
+      (trimSubject <$> OA.strArgument (OA.metavar "SUBJECT") <|> defaultSubjectParser) <*>
       OA.flag EntryOperationRevise EntryOperationInitialize (OA.long "init" <> OA.short 'i') <*>
       OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f')
+
+    defaultSubjectParser = case defaultSubject of
+      Just subj -> pure subj
+      Nothing -> empty
 
     trimSubject :: String -> String
     trimSubject subj = if ".json" `isSuffixOf` subj
@@ -241,13 +246,14 @@ handleKeyGeneration (KeyGenerationArguments fname) = do
     writeKeyFile :: FilePath -> Encoding -> IO ()
     writeKeyFile fname enc = B.writeFile fname $ serializeEncoding enc
 
-argumentParser :: OA.Parser Arguments
-argumentParser = (ArgumentsEntryUpdate <$> entryUpdateArgumentParser) <|>
+argumentParser :: Maybe String -> OA.Parser Arguments
+argumentParser defaultSubject = (ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject) <|>
   (ArgumentsKeyGeneration <$> keyGenerationParser)
 
 main :: IO ()
 main = do
-  args <- OA.execParser $ OA.info (argumentParser <**> OA.helper) mempty
+  defaultSubject :: Maybe String <- lookupEnv "METADATA_SUBJECT"
+  args <- OA.execParser $ OA.info (argumentParser defaultSubject <**> OA.helper) mempty
   case args of
     ArgumentsEntryUpdate eua -> handleEntryUpdateArguments eua
     ArgumentsKeyGeneration ka -> handleKeyGeneration ka
