@@ -65,9 +65,9 @@ testParse = do
   Just complete <- pure $ do
     e <- partialToCompleteOwnership parsed
     mapM partialToCompleteRegistryEntry e
-  print $ verifyPreimage (_withOwnership_value complete)
-  print $ verifyAttestations $ _withOwnership_value complete
-  print $ verifyRegistryOwnership complete
+  -- print $ verifyPreimage (_withOwnership_value complete)
+  -- print $ verifyAttestations $ _withOwnership_value complete
+  -- print $ verifyRegistryOwnership complete
   BS.writeFile "test.json" $ T.encodeUtf8 $ mconcat
     [ PP.renderStrict $ PP.layoutPretty PP.defaultLayoutOptions $ serializeRegistryEntry parsed
     , "\n"
