@@ -12,6 +12,7 @@ import Control.Arrow (left)
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as B8
 import Data.List (isSuffixOf)
 import qualified Data.Map as Map
 import qualified Data.Text as T
@@ -76,7 +77,7 @@ poorlyAttest :: a -> Attested a
 poorlyAttest v = Attested [] v
 
 withQuotes :: String -> String
-withQuotes s = "\"" <> s <> "\"" -- XXX This is not at all the best way to do this part. I shall seek another.
+withQuotes s = B8.unpack $ A.encode $ A.String $ T.pack s
 
 entryUpdateArgumentParser :: Maybe String -> OA.Parser EntryUpdateArguments
 entryUpdateArgumentParser defaultSubject = EntryUpdateArguments <$>
