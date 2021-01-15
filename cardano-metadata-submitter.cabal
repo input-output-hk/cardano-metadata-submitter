@@ -44,9 +44,17 @@ library
 
 executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
-  build-depends: base ^>=4.12.0.0
-               , cardano-prelude
-               , cardano-metadata-submitter
+  build-depends:       base ^>=4.12.0.0
+                     , aeson
+                     , bytestring
+                     , cardano-crypto-class
+                     , cardano-binary
+                     , cardano-prelude
+                     , cardano-metadata-submitter
+                     , containers
+                     , directory
+                     , optparse-applicative
+                     , text
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions: NoImplicitPrelude
