@@ -1,3 +1,4 @@
+{-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 import Cardano.Binary
 import Cardano.Crypto.DSIGN
@@ -92,9 +93,13 @@ argumentParser = Arguments <$>
       optional preimageParser
 
     preimageParser :: OA.Parser Preimage
-    preimageParser = Preimage <$>
-      (T.pack <$> OA.strOption (OA.long "hashFn" <> OA.short 'H' <> OA.metavar "HASH_FUNCTION")) <*>
-      (T.pack <$> OA.strOption (OA.long "preimage" <> OA.short 'p' <> OA.metavar "PREIMAGE"))
+    preimageParser = do
+      hashFn <- T.pack <$> OA.strOption (OA.long "hashFn" <> OA.short 'H' <> OA.metavar "HASH_FUNCTION")
+      preimage <- T.pack <$> OA.strOption (OA.long "preimage" <> OA.short 'p' <> OA.metavar "PREIMAGE")
+      pure $ Preimage
+        { _preimage_hashFn = hashFn
+        , _preimage_preimage = preimage
+        }
 
 combineRegistryEntries :: GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe -> GoguenRegistryEntry Maybe
 combineRegistryEntries new old = GoguenRegistryEntry
