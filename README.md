@@ -112,6 +112,9 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
 
 Note that if you modify fields that already have attestation signatures associated with them, those attestation signatures will be removed as they are no longer valid.
 
+To only attest to one field, and not both, you can use flags. `-N` attests just the name, and `-D` attests just
+the description. By default, both fields are attested if you provide an attestation key.
+
 ### Adding an ownership signature
 
 Any number of signatures can be provided for each field in an entry, allowing multiple identities to attest to the validity of each metadata field for a given subject. The Goguen Metadata Registry also uses ED25519 signatures to verify ownership of a particular entry. Ownership is claimed by signing the entire entry, and only one ownership signature can be provided. You can sign for ownership as follows:
