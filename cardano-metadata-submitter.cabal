@@ -51,6 +51,7 @@ executable cardano-metadata-submitter
                      , cardano-binary
                      , cardano-prelude
                      , cardano-metadata-submitter
+                     , containers
                      , directory
                      , optparse-applicative
                      , text

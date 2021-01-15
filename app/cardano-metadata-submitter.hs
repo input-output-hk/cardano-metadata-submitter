@@ -10,6 +10,7 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as B
 import Data.List (isSuffixOf)
+import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
 import Prelude (String, id)
@@ -124,7 +125,18 @@ attestFields key old = do
     }
 
 ownerSignature :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String OwnershipSignature
-ownerSignature key reg = Left "Ownership signatures not yet supported" -- XXX
+ownerSignature key reg = makeOwnershipSignature key <$> hashes where
+  hashes = do
+    subj <- asEither "subject" $ _goguenRegistryEntry_subject reg
+    name <- asEither "name" $ _goguenRegistryEntry_name reg
+    description <- asEither "description" $ _goguenRegistryEntry_description reg
+    pure $ registryHashesForOwnership subj $ Map.fromList
+      [ withWellKnown (_attested_property name) $ \p _ -> (p, _wellKnown_raw <$> name)
+      , withWellKnown (_attested_property description) $ \p _ -> (p, _wellKnown_raw <$> description)
+      ]
+
+  asEither _ (Just x) = Right x
+  asEither s Nothing = Left $ "cannot hash with missing " <> s
 
 main :: IO ()
 main = do
