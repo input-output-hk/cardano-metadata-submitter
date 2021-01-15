@@ -34,6 +34,11 @@ data EntryOperation
   | EntryOperationRevise
   deriving Show
 
+data AttestationField
+  = AttestationFieldName
+  | AttestationFieldDescription
+  deriving (Show, Eq, Ord)
+
 data FileInfo = FileInfo
   { _FileInfoSubject :: String
   , _FileInfoEntryOperation :: EntryOperation
@@ -50,6 +55,7 @@ draftFilename fi = canonicalFilename fi <> ".draft"
 data EntryUpdateArguments = EntryUpdateArguments
   { _EntryUpdateArgumentsInputSource :: InputSource
   , _EntryUpdateArgumentsAttestationKeyFilename :: Maybe String
+  , _EntryUpdateArgumentsAttestationFields :: [AttestationField]
   , _EntryUpdateArgumentsOwnershipKeyFilename :: Maybe String
   , _EntryUpdateArgumentsRegistryEntry :: PartialGoguenRegistryEntry
   }
@@ -83,11 +89,18 @@ entryUpdateArgumentParser :: Maybe String -> OA.Parser EntryUpdateArguments
 entryUpdateArgumentParser defaultSubject = EntryUpdateArguments <$>
   inputSourceArgumentParser <*>
   optional (OA.strOption (OA.long "attest-keyfile" <> OA.short 'a' <> OA.metavar "ATTESTATION_KEY_FILE")) <*>
+  attestationFieldNamesParser <*>
   optional (OA.strOption (OA.long "owner-keyfile" <> OA.short 'o' <> OA.metavar "OWNER_KEY_FILE")) <*>
   goguenRegistryEntryParser where
     inputSourceArgumentParser :: OA.Parser InputSource
     inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'I') <|>
       (InputSourceFile <$> fileInfoArgumentParser)
+
+    attestationFieldNamesParser :: OA.Parser [AttestationField]
+    attestationFieldNamesParser =
+      OA.flag' [AttestationFieldName] (OA.long "attest-name" <> OA.short 'N') <|>
+      OA.flag' [AttestationFieldDescription] (OA.long "attest-description" <> OA.short 'D') <|>
+      pure [AttestationFieldName, AttestationFieldDescription]
 
     fileInfoArgumentParser :: OA.Parser FileInfo
     fileInfoArgumentParser = FileInfo <$>
@@ -132,21 +145,23 @@ combineRegistryEntries new old = GoguenRegistryEntry
       _ -> a <|> b
     raw (WellKnown (PropertyValue r _) _) = r
 
-attestField :: WellKnownProperty p => SignKeyDSIGN Ed25519DSIGN -> Subject -> Attested (WellKnown p) -> Attested (WellKnown p)
-attestField key subj (Attested att wk@(WellKnown raw structed)) = Attested attestations wk where
-  wkHash = hashesForAttestation subj (wellKnownPropertyName (Identity structed)) raw
-  newAttestationSig = makeAttestationSignature key wkHash
-  attestations = newAttestationSig:att
-
-attestFields :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String PartialGoguenRegistryEntry
-attestFields key old = do
+attestFields :: SignKeyDSIGN Ed25519DSIGN -> [AttestationField] -> PartialGoguenRegistryEntry -> Either String PartialGoguenRegistryEntry
+attestFields key props old = do
   subj <- case _goguenRegistryEntry_subject old of
     Just subj -> pure subj
     Nothing -> Left "Cannot attest without a subject record"
   pure $ old
-    { _goguenRegistryEntry_name = attestField key subj <$> _goguenRegistryEntry_name old
-    , _goguenRegistryEntry_description = attestField key subj <$> _goguenRegistryEntry_description old
+    { _goguenRegistryEntry_name = attestField AttestationFieldName subj <$> _goguenRegistryEntry_name old
+    , _goguenRegistryEntry_description = attestField AttestationFieldDescription subj <$> _goguenRegistryEntry_description old
     }
+  where
+    attestField :: WellKnownProperty p => AttestationField -> Subject -> Attested (WellKnown p) -> Attested (WellKnown p)
+    attestField fld subj (Attested att wk@(WellKnown raw structed)) = if fld `elem` props
+      then Attested attestations wk
+      else Attested att wk where
+        wkHash = hashesForAttestation subj (wellKnownPropertyName (Identity structed)) raw
+        newAttestationSig = makeAttestationSignature key wkHash
+        attestations = newAttestationSig:att
 
 ownerSignature :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String OwnershipSignature
 ownerSignature key reg = makeOwnershipSignature key <$> hashes where
@@ -163,7 +178,7 @@ ownerSignature key reg = makeOwnershipSignature key <$> hashes where
   asEither s Nothing = Left $ "cannot hash with missing " <> s
 
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
-handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile ownerKeyFile newEntryInfo) = do
+handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestProps ownerKeyFile newEntryInfo) = do
   attestKey <- mapM readKeyFile attestKeyFile
   ownerKey <- mapM readKeyFile ownerKeyFile
 
@@ -188,7 +203,7 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile ownerKe
   let newRecord = combineRegistryEntries newEntryInfo record
 
   newRecordWithAttestations <- dieOnLeft "Adding attestation" $ case attestKey of
-    Just k -> attestFields k newRecord
+    Just k -> attestFields k attestProps newRecord
     Nothing -> pure newRecord
 
   newOwner <- dieOnLeft "Adding owner signature" $ case ownerKey of
