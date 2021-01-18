@@ -260,7 +260,11 @@ handleKeyGeneration (KeyGenerationArguments fname) = do
   writeKeyFile privKeyName $ encodeSignKeyDSIGN @Ed25519DSIGN signKey
   where
     writeKeyFile :: FilePath -> Encoding -> IO ()
-    writeKeyFile fname enc = B.writeFile fname $ serializeEncoding enc
+    writeKeyFile fname enc = do
+      exists <- doesFileExist fname
+      if exists
+        then die $ T.pack $ "File already exists: " <> fname
+        else B.writeFile fname $ serializeEncoding enc
 
 argumentParser :: Maybe String -> OA.Parser Arguments
 argumentParser defaultSubject = (ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject) <|>
