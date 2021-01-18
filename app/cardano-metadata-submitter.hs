@@ -213,6 +213,12 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
   let newRecordWithOwnership = WithOwnership newOwner newRecordWithAttestations
       outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
+  case _goguenRegistryEntry_preimage newRecordWithAttestations of
+    Nothing -> pure ()
+    Just preimage -> dieOnLeft "Checking preimage" $ do
+      subject <- maybe (Left "Subject missing") Right $ _goguenRegistryEntry_subject newRecordWithAttestations
+      verifyPreimage subject preimage
+
   case inputInfo of
     InputSourceFile fInfo -> do
       writeFile (draftFilename fInfo) outputString

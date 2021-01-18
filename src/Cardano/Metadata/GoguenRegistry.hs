@@ -181,13 +181,14 @@ parseAnnotatedSignature f o = do
   pure $ f publicKey signature
 
 verifyPreimage
-  :: CompleteGoguenRegistryEntry
-  -> Either () ()
-verifyPreimage entry =
-  case T.decodeHex (unSubject (runIdentity (_goguenRegistryEntry_subject entry))) of
-    Nothing -> Left ()
+  :: (Monoid s, IsString s)
+  => Subject
+  -> Preimage
+  -> Either s ()
+verifyPreimage (Subject subject) preimage =
+  case T.decodeHex subject of
+    Nothing -> Left "Subject is not a byte string"
     Just subject -> do
-      let Identity preimage = _goguenRegistryEntry_preimage entry
       hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
         Right (Some h) -> Right $ case h of
           (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
@@ -196,12 +197,15 @@ verifyPreimage entry =
             hashToBytes . hashWith @h id
           (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
             hashToBytes . hashWith @h id
-        Left () -> Left ()
+        Left () -> Left $ mconcat
+          [ "Hash function not supported. Supported functions: "
+          , "sha256, blake2b-256, blake2b-224"
+          ]
       case T.decodeHex (_preimage_preimage preimage) of
-        Nothing -> Left ()
+        Nothing -> Left "Preimage is not a byte string"
         Just preimageBytes -> do
           case hasher preimageBytes == subject of
-            False -> Left ()
+            False -> Left "Hashed preimage does not equal subject"
             True -> pure ()
 
 verifyAttestations
