@@ -43,7 +43,8 @@ The result of running this query is a new file in the working directory, `351356
 }
 ```
 
-If you pass a subject that already has an entry to `-i`, then your draft will be a copy of the original.
+If you pass a subject that already has an entry to `-i`, then your draft will be a freshly initialized version. To modify
+the original instead, do not provide `-i`, and your draft will be a copy of the original.
 
 ### Adding a preimage
 
