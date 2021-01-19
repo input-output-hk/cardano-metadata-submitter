@@ -230,7 +230,12 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
 
   newOwner <- dieOnLeft "Adding owner signature" $ case ownerKey of
     Just k -> Just <$> ownerSignature k newRecordWithAttestations
-    Nothing -> pure oldOwner
+    Nothing -> pure $ do
+      new <- partialToCompleteRegistryEntry newRecordWithAttestations
+      oldOwner' <- oldOwner
+      case verifyRegistryOwnership (WithOwnership (Identity oldOwner') new) of
+        Left _ -> Nothing
+        Right _ -> pure oldOwner'
 
   let newRecordWithOwnership = WithOwnership newOwner newRecordWithAttestations
       finalVerificationStatus = verifyEverything newRecordWithOwnership
