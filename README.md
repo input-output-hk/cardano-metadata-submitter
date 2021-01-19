@@ -178,7 +178,7 @@ As with attestation signatures, if you modify your entry at all after signing it
 
 ### Creating your PR branch
 
-At this point we have added all of the metadata values we want to our entry, have attested to the validity of each field, and signed the entry with our ownership key. We are ready to finalize the entry and turn it into a pull request to the metadata repository:
+At this point we have added all of the metadata values we want to our entry, have attested to the validity of each field, and signed the entry with our ownership key. We are ready to finalize the entry and turn it into a pull request to the metadata repository, which also performs validation to ensure that all signatures are valid and all required fields are present:
 
 ```
 cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058 -f
