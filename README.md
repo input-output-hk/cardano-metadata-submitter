@@ -51,18 +51,28 @@ the original instead, do not provide `-i`, and your draft will be a copy of the 
 The most important piece of metadata for our script hash is, of course, the script itself. We can specify a preimage for our subject as such:
 
 ```
-cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058 -H sha256 -p 'my-goguen-script'
+cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058 -H sha256 -p '6d792d676f6775656e2d736372697074'
 ```
+
+The result is:
 
 
 ```
 {
     "subject": "3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058",
     "preImage": {
-        "value": "my-goguen-script"
-        "hashFn": "sha256",
+        "value": "6d792d676f6775656e2d736372697074",
+        "hashFn": "sha256"
     }
 }
+```
+
+Note that the preimage is a byte string! If your subject is the hash of a utf-8 encoded string, you can convert it to bytes with `xxd`:
+
+```
+> echo -n 'my-goguen-script' | xxd -p
+6d792d676f6775656e2d736372697074
+
 ```
 
 ### Adding multiple fields at once
@@ -78,8 +88,8 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
 {
     "subject": "3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058",
     "preImage": {
-        "value": "sha256",
-        "hashFn": "my-goguen-script"
+        "value": "6d792d676f6775656e2d736372697074",
+        "hashFn": "sha256"
     },
     "name": {
         "value": "My Goguen Script",
@@ -106,15 +116,15 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
 {
     "subject": "3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058",
     "preImage": {
-        "value": "my-goguen-script",
+        "value": "6d792d676f6775656e2d736372697074",
         "hashFn": "sha256"
     },
     "name": {
         "value": "My Goguen Script",
         "anSignatures": [
             {
-                "publicKey": "1bb5ddc6c2679bcffdf6e5f2f943d92922ce64df0ed20cee1b1aaef0cb6aba44",
-                "signature": "233dc4b8a0632e9549ceb5c612595ca47a9223796100b9088c9bbbd5d9e79740a7e951d3cfd3ed68bea6a5d35f6934609b4fcc2046e3acaa9e4db3e753493509"
+                "publicKey": "681c37ef6d04ee57e45e15b035ed06bb2110adff93a6e35993bdab1009a576d6",
+                "signature": "d366c0a80a9fb8e7fe0bdc710be5551621aeb0b1a75833415b79ddd8b7f85227bbd540df4991440d8a6d7fccb4d3bd739755b4a71659cd8c1059b9699622ff04"
             }
         ]
     },
@@ -122,11 +132,12 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
         "value": "A script I have registered on chain",
         "anSignatures": [
             {
-                "publicKey": "1bb5ddc6c2679bcffdf6e5f2f943d92922ce64df0ed20cee1b1aaef0cb6aba44",
-                "signature": "a35cd71c6dbe429cdc79e4be8e2410121e9244e157258d34db694fa409e2d04663dfc51df70ee806d12dac24ad745e6b7e643896d61cda7c6dbf7cedbe36220b"
+                "publicKey": "681c37ef6d04ee57e45e15b035ed06bb2110adff93a6e35993bdab1009a576d6",
+                "signature": "f235875f996fb452d16465ff3af984ece700a6d7bd18569197cf1c2884dc6e0ab74a1a7887145d8c01c0d54fd6a6c57636bdcc1980bf024c42c42e3d7ff3d409"
             }
         ]
     }
+}
 ```
 
 Note that if you modify fields that already have attestation signatures associated with them, those attestation signatures will be removed as they are no longer valid.
@@ -146,15 +157,15 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
 {
     "subject": "3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058",
     "preImage": {
-        "value": "my-goguen-script",
+        "value": "6d792d676f6775656e2d736372697074",
         "hashFn": "sha256"
     },
     "name": {
         "value": "My Goguen Script",
         "anSignatures": [
             {
-                "publicKey": "1bb5ddc6c2679bcffdf6e5f2f943d92922ce64df0ed20cee1b1aaef0cb6aba44",
-                "signature": "233dc4b8a0632e9549ceb5c612595ca47a9223796100b9088c9bbbd5d9e79740a7e951d3cfd3ed68bea6a5d35f6934609b4fcc2046e3acaa9e4db3e753493509"
+                "publicKey": "681c37ef6d04ee57e45e15b035ed06bb2110adff93a6e35993bdab1009a576d6",
+                "signature": "d366c0a80a9fb8e7fe0bdc710be5551621aeb0b1a75833415b79ddd8b7f85227bbd540df4991440d8a6d7fccb4d3bd739755b4a71659cd8c1059b9699622ff04"
             }
         ]
     },
@@ -162,14 +173,14 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
         "value": "A script I have registered on chain",
         "anSignatures": [
             {
-                "publicKey": "1bb5ddc6c2679bcffdf6e5f2f943d92922ce64df0ed20cee1b1aaef0cb6aba44",
-                "signature": "a35cd71c6dbe429cdc79e4be8e2410121e9244e157258d34db694fa409e2d04663dfc51df70ee806d12dac24ad745e6b7e643896d61cda7c6dbf7cedbe36220b"
+                "publicKey": "681c37ef6d04ee57e45e15b035ed06bb2110adff93a6e35993bdab1009a576d6",
+                "signature": "f235875f996fb452d16465ff3af984ece700a6d7bd18569197cf1c2884dc6e0ab74a1a7887145d8c01c0d54fd6a6c57636bdcc1980bf024c42c42e3d7ff3d409"
             }
         ]
     },
     "owner": {
-        "publicKey": "17b34620988f919ad082f3f99bf8baa12d3646a1f03a55a790eaf38649eb0888",
-        "signature": "0084fe036c60f74ee08ec5d1716a789803f8a2348ce86f41cbb483fd25a500eaea07db024719c5ad4c1fe09d8d13a1001744864860c13372b758c94661065800"
+        "publicKey": "fc5d7e9347fe1cb728815c977d609f3cd51831fc40f22d37f15ec14e20196351",
+        "signature": "4866b512189d0fc8023326dcfde4ca104e9c14327d8c20f908289a3a47f4bdc19ba775734d5e50680e9fb305eb19a78fb5a5d8e50f5d70f7b2a81b00957dc203"
     }
 }
 ```
@@ -184,11 +195,11 @@ At this point we have added all of the metadata values we want to our entry, hav
 cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058 -f
 ```
 
-If you haven't been performing these operations in a checkout of your fork of the metadata repository, move your entry there now and you can perform the following steps to submit your entry:
+If you haven't been performing these operations in a checkout of your fork of the metadata repository, move your entry there now into the `registry` directory and you can perform the following steps to submit your entry:
 
 ```
 git checkout -b "my-metadata-submission"
-git add 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058.json
+git add registry/3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058.json
 git commit -m "Example submission"
 git push
 ```
