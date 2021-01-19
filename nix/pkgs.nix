@@ -8,4 +8,5 @@ pkgs: _: with pkgs; {
       buildPackages
       makeWrapper;
   };
+  inherit (cardanoMetadataSubmitterPackages.cardano-metadata-submitter.components.exes) cardano-metadata-submitter;
 }

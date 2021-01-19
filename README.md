@@ -9,7 +9,11 @@ A library and CLI for manipulating data intended for the [Goguen Metadata Regist
 
 ### Building
 
-TODO
+`nix-build` will build all the library components, including test suite.
+
+### Shell
+
+To get a shell which has the tool in scope you can use `nix-shell -A devops`.
 
 ### Accessing the registry
 

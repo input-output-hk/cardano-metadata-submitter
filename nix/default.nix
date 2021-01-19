@@ -31,7 +31,7 @@ let
         commonLib = lib // iohkNix
           // import ./util.nix { inherit haskell-nix; }
           # also expose our sources and overlays
-          // { inherit overlays sources; };
+          // { inherit overlays sources nixpkgs; };
 
         # Example of using a package from iohk-nix
         # TODO: Declare packages required by the build.
