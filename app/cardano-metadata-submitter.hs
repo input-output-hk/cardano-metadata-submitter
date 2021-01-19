@@ -156,12 +156,15 @@ attestFields key props old = do
     }
   where
     attestField :: WellKnownProperty p => AttestationField -> Subject -> Attested (WellKnown p) -> Attested (WellKnown p)
-    attestField fld subj (Attested att wk@(WellKnown raw structed)) = if fld `elem` props
+    attestField fld subj orig@(Attested att wk) = if fld `elem` props
       then Attested attestations wk
       else Attested att wk where
-        wkHash = hashesForAttestation subj (wellKnownPropertyName (Identity structed)) raw
+        wkHash = extractAttestationHashes subj orig
         newAttestationSig = makeAttestationSignature key wkHash
         attestations = newAttestationSig:att
+
+extractAttestationHashes :: WellKnownProperty p => Subject -> Attested (WellKnown p) -> HashesForAttestation
+extractAttestationHashes subj (Attested att (WellKnown raw structured)) = hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw
 
 ownerSignature :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String OwnershipSignature
 ownerSignature key reg = makeOwnershipSignature key <$> hashes where
@@ -193,11 +196,20 @@ verifyEverything record = do
           }
         , _withOwnership_owner = Identity owner
         }
+
   left (const "Ownership signature verifiction failed") $ verifyRegistryOwnership idRecord
-  -- TODO: Verify attestations
+
+  let verifyAttestations fieldName field = do
+        let hashes = extractAttestationHashes subj field
+            (Attested attestations _) = field
+        left (const $ fieldName <> " attestation verification failed") $ verifyAttested $ Attested attestations hashes
+
+  verifyAttestations "Name" name
+  verifyAttestations "Desc" desc
   where
     verifyField :: String -> (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
     verifyField name field = maybe (Left $ name <> " missing") Right $ field $ _withOwnership_value record
+
 
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
 handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestProps ownerKeyFile newEntryInfo) = do
