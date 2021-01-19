@@ -177,6 +177,28 @@ ownerSignature key reg = makeOwnershipSignature key <$> hashes where
   asEither _ (Just x) = Right x
   asEither s Nothing = Left $ "cannot hash with missing " <> s
 
+verifyEverything :: WithOwnership Maybe PartialGoguenRegistryEntry -> Either String ()
+verifyEverything record = do
+  subj <- verifyField "Subject" _goguenRegistryEntry_subject
+  name <- verifyField "Name" _goguenRegistryEntry_name
+  desc <- verifyField "Description" _goguenRegistryEntry_description
+  preimage <- verifyField "Preimage" _goguenRegistryEntry_preimage
+  owner <- maybe (Left "Owner missing") Right $ _withOwnership_owner record
+  let idRecord :: WithOwnership Identity CompleteGoguenRegistryEntry = WithOwnership
+        { _withOwnership_value = GoguenRegistryEntry
+          { _goguenRegistryEntry_subject = Identity subj
+          , _goguenRegistryEntry_name = Identity name
+          , _goguenRegistryEntry_description = Identity desc
+          , _goguenRegistryEntry_preimage = Identity preimage
+          }
+        , _withOwnership_owner = Identity owner
+        }
+  left (const "Ownership signature verifiction failed") $ verifyRegistryOwnership idRecord
+  -- TODO: Verify attestations
+  where
+    verifyField :: String -> (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
+    verifyField name field = maybe (Left $ name <> " missing") Right $ field $ _withOwnership_value record
+
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
 handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestProps ownerKeyFile newEntryInfo) = do
   attestKey <- mapM readKeyFile attestKeyFile
@@ -211,6 +233,7 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
     Nothing -> pure oldOwner
 
   let newRecordWithOwnership = WithOwnership newOwner newRecordWithAttestations
+      finalVerificationStatus = verifyEverything newRecordWithOwnership
       outputString = show (serializeRegistryEntry newRecordWithOwnership) <> "\n"
 
   case _goguenRegistryEntry_preimage newRecordWithAttestations of
@@ -223,7 +246,9 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
     InputSourceFile fInfo -> do
       writeFile (draftFilename fInfo) outputString
       case _FileInfoDraftStatus fInfo of
-        DraftStatusFinal -> renameFile (draftFilename fInfo) $ canonicalFilename fInfo
+        DraftStatusFinal -> do
+          dieOnLeft "Finalizing" finalVerificationStatus
+          renameFile (draftFilename fInfo) $ canonicalFilename fInfo
         DraftStatusDraft -> pure ()
     InputSourceStdin -> do
       putStr outputString
