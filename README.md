@@ -204,3 +204,19 @@ cardano-metadata-submitter -K attestation-key
 ```
 
 This will create two files, `attestation-key.prv` and `attestation-key.pub`. Remember not to include these in your git commits, and store your private key with as much care as any other private key!
+
+### Environment Variable for Current Metadata Subject
+
+If you set the `METADATA_SUBJECT` environnment variable, all commands will assume that as
+your current metadata subject if none is provided. This is useful for scripts.
+
+That means that these two snippets are equivalent:
+```bash
+export METADATA_SUBJECT=3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058
+cardano-metadata-submitter -f
+```
+
+And:
+```bash
+cardano-metadata-submitter -f 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058
+```
