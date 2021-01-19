@@ -7,6 +7,20 @@ A library and CLI for manipulating data intended for the [Goguen Metadata Regist
 
 ## Usage
 
+### Building
+
+TODO
+
+### Accessing the registry
+
+This tool is used in the context of editing a working copy of the [Goguen Metadata Registry](https://github.com/cardano-foundation/goguen-metadata-registry), and so in order to use it, you must first make a checkout of it, and
+change your working directory to the `registry` subdirectory of it:
+
+```bash
+git checkout git@github.com:cardano-foundation/goguen-metadata-registry
+cd goguen-metadata-registry/registry
+```
+
 ### Creating a new entry or modifying an preexisting one:
 
 Data is submitted to the Goguen Metadata Registry via pull request of a single file. The name of the file corresponds to the subject of the metadata entry. This CLI tool has been designed to fit into a git based workflow for creating and modifying entries.
