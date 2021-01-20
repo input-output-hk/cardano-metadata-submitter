@@ -38,6 +38,7 @@ let
     buildInputs = with haskellPackages; [
       niv
       cardano-metadata-submitter
+      xxd
     ];
     shellHook = ''
       echo "DevOps Tools" \
