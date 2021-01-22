@@ -7,9 +7,37 @@ A library and CLI for manipulating data intended for the [Goguen Metadata Regist
 
 ## Usage
 
+For both building with `nix-build` and using `nix-shell`, it might take a very long
+time if you do not have the Cardano binary cache set up. Adding the
+IOHK binary cache to your Nix configuration will speed up builds a lot,
+since many things will have been built already by our CI.
+
+If you find you are building packages that are not defined in this
+repository, or if the build seems to take a very long time then you may
+not have this set up properly.
+
+To set up the cache:
+
+* On non-NixOS, edit /etc/nix/nix.conf and add the following lines:
+
+```
+substituters        = https://hydra.iohk.io https://iohk.cachix.org https://cache.nixos.org/
+trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= iohk.cachix.org-1:DpRUyj7h7V830dp/i6Nti+NEO2/nhblbov/8MW7Rqoo= cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY=
+```
+
+* On NixOS, set the following NixOS options:
+
+```
+nix = {
+  binaryCaches          = [ "https://hydra.iohk.io" "https://iohk.cachix.org" ];
+  binaryCachePublicKeys = [ "hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=" "iohk.cachix.org-1:DpRUyj7h7V830dp/i6Nti+NEO2/nhblbov/8MW7Rqoo=" ];
+};
+```
+
 ### Building
 
 `nix-build` will build all the library components, including test suite.
+
 
 ### Shell
 
