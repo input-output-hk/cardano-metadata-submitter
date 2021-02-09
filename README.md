@@ -103,6 +103,28 @@ Note that the preimage is a byte string! If your subject is the hash of a utf-8 
 
 ```
 
+#### Adding a token name to a subject
+
+`preimage` is an optional field. One situation where preimage is not specified is where the subject is,
+in fact, a hash of a script plus a specific token name. This can be specified on the command line by using
+the script name as the usual subject argument, plus an additional `-t` flag to specify the token name.
+The token name will be encoded as hex and appended to the subject:
+
+```
+> cardano-metadata-submitter -i 3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c9 -t 'MySpecialToken'
+3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c94d795370656369616c546f6b656e.json.draft
+```
+
+For these situations, the longer subject can also be specified directly. This is merely a convenience for
+calculating the subject in these situations:
+
+```
+> cardano-metadata-submitter -i 3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c94d795370656369616c546f6b656e
+3fec5769b5cf4e310a7d150508e82fb8e3eda1c2c94c61492d3bd8aea99e06c94d795370656369616c546f6b656e.json.draft
+```
+
+No preimage will be allowed (as it will not hash to the longer subject).
+
 ### Adding multiple fields at once
 
 We can specify multiple pieces of metadata at once. Here we will add a name and description for our script hash in one invocation:
@@ -131,6 +153,17 @@ cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1
     }
 }
 ```
+
+#### Adding a logo field
+
+To add a logo field, specify `-l` and a file containing the logo, which must be in PNG format.
+It will be encoded in base64 in the `.json` file.
+
+```
+> cardano-metadata-submitter 3513560a0f272e96605cd88c0c892208e00781ba2403c1127c7b1da34fdbf058 -l logo.png
+```
+
+Currently, ownership signatures are not supported if a logo is present.
 
 ### Adding attestation signatures to entries
 
