@@ -14,8 +14,6 @@ import Cardano.Metadata.GoguenRegistry
 import Cardano.Metadata.Types
 
 import Cardano.Crypto.Hash
-import Cardano.Crypto.DSIGN
-import qualified Text.Hex as T
 import Data.Some
 import Data.Tagged
 import qualified Data.Text.Encoding as T
@@ -62,7 +60,7 @@ testParse = do
   p <- pure $
     A.eitherDecodeStrictWith A.json' (AInternal.iparse parseRegistryEntry) testInput
   Right parsed <- pure p
-  Just complete <- pure $ do
+  Just _complete <- pure $ do
     e <- partialToCompleteOwnership parsed
     mapM partialToCompleteRegistryEntry e
   -- print $ verifyPreimage (_withOwnership_value complete)

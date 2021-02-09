@@ -94,7 +94,7 @@ withSupportedPreimageHash
   :: Some SupportedPreimageHash
   -> (forall h. HashAlgorithm h => SupportedPreimageHash h -> x)
   -> x
-withSupportedPreimageHash some k = case some of
+withSupportedPreimageHash sm k = case sm of
   Some sh -> case sh of
     h@(SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) -> k h
     h@(SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) -> k h
@@ -185,8 +185,8 @@ verifyPreimage
   => Subject
   -> Preimage
   -> Either s ()
-verifyPreimage (Subject subject) preimage =
-  case T.decodeHex subject of
+verifyPreimage (Subject subjectHex) preimage =
+  case T.decodeHex subjectHex of
     Nothing -> Left "Subject is not a byte string"
     Just subject -> do
       hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
@@ -207,6 +207,27 @@ verifyPreimage (Subject subject) preimage =
           case hasher preimageBytes == subject of
             False -> Left "Hashed preimage does not equal subject"
             True -> pure ()
+
+hashPreimage
+  :: (Monoid s, IsString s)
+  => Preimage
+  -> Either s Subject
+hashPreimage preimage = do
+  hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
+    Right (Some h) -> Right $ case h of
+      (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+      (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+      (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+    Left () -> Left $ mconcat
+      [ "Hash function not supported. Supported functions: "
+      , "sha256, blake2b-256, blake2b-224"
+      ]
+  case T.decodeHex (_preimage_preimage preimage) of
+    Nothing -> Left "Preimage is not a byte string"
+    Just preimageBytes -> pure $ Subject $ T.encodeHex $ hasher preimageBytes
 
 verifyAttestations
   :: CompleteGoguenRegistryEntry

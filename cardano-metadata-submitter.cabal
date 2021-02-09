@@ -12,7 +12,7 @@ maintainer:          operations@iohk.io
 
 flag development
     description: Disable `-Werror`
-    default: True
+    default: False
     manual: True
 
 library
@@ -40,7 +40,7 @@ library
   default-extensions: NoImplicitPrelude
                       OverloadedStrings
   if (!flag(development))
-    ghc-options: -Werror
+    ghc-options: -Werror -Wall
 
 executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
@@ -55,12 +55,13 @@ executable cardano-metadata-submitter
                      , directory
                      , optparse-applicative
                      , text
+                     , unordered-containers
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions: NoImplicitPrelude
                       OverloadedStrings
   if (!flag(development))
-    ghc-options: -Werror
+    ghc-options: -Werror -Wall
 
 test-suite unit
   default-language: Haskell2010

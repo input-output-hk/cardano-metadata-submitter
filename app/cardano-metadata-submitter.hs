@@ -1,4 +1,5 @@
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 import Cardano.Binary
@@ -13,11 +14,12 @@ import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as B8
+import qualified Data.HashMap.Strict as HM
 import Data.List (isSuffixOf)
 import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
-import Prelude (String, id)
+import Prelude (String)
 import System.Directory (doesFileExist, renameFile)
 import System.Environment (lookupEnv)
 
@@ -27,7 +29,13 @@ data DraftStatus = DraftStatusDraft | DraftStatusFinal
 data InputSource
   = InputSourceFile FileInfo
   | InputSourceStdin
+  | InputSourceCBORJson CBORInfo
   deriving Show
+
+data CBORInfo = CBORInfo
+  { _CBORInfoFilename :: String
+  , _CBORInfoHashFunction :: String
+  } deriving Show
 
 data EntryOperation
   = EntryOperationInitialize
@@ -94,7 +102,8 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments <$>
   goguenRegistryEntryParser where
     inputSourceArgumentParser :: OA.Parser InputSource
     inputSourceArgumentParser = OA.flag' InputSourceStdin (OA.long "stdin" <> OA.short 'I') <|>
-      (InputSourceFile <$> fileInfoArgumentParser)
+      (InputSourceFile <$> fileInfoArgumentParser) <|>
+      (InputSourceCBORJson <$> cborInfoArgumentParser)
 
     attestationFieldNamesParser :: OA.Parser [AttestationField]
     attestationFieldNamesParser =
@@ -107,6 +116,10 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments <$>
       (trimSubject <$> OA.strArgument (OA.metavar "SUBJECT") <|> defaultSubjectParser) <*>
       OA.flag EntryOperationRevise EntryOperationInitialize (OA.long "init" <> OA.short 'i') <*>
       OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f')
+
+    cborInfoArgumentParser = CBORInfo <$>
+      OA.strOption (OA.long "cbor-info" <> OA.short 'c' <> OA.metavar "CBOR_INFO_FILENAME") <*>
+      OA.strOption (OA.long "hash-function" <> OA.short 'H' <> OA.metavar "HASH_FUNCTION")
 
     defaultSubjectParser = case defaultSubject of
       Just subj -> pure subj
@@ -164,7 +177,7 @@ attestFields key props old = do
         attestations = newAttestationSig:att
 
 extractAttestationHashes :: WellKnownProperty p => Subject -> Attested (WellKnown p) -> HashesForAttestation
-extractAttestationHashes subj (Attested att (WellKnown raw structured)) = hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw
+extractAttestationHashes subj (Attested _ (WellKnown raw structured)) = hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw
 
 ownerSignature :: SignKeyDSIGN Ed25519DSIGN -> PartialGoguenRegistryEntry -> Either String OwnershipSignature
 ownerSignature key reg = makeOwnershipSignature key <$> hashes where
@@ -199,13 +212,13 @@ verifyEverything record = do
 
   left (const "Ownership signature verifiction failed") $ verifyRegistryOwnership idRecord
 
-  let verifyAttestations fieldName field = do
+  let verifyLocalAttestations fieldName field = do
         let hashes = extractAttestationHashes subj field
             (Attested attestations _) = field
         left (const $ fieldName <> " attestation verification failed") $ verifyAttested $ Attested attestations hashes
 
-  verifyAttestations "Name" name
-  verifyAttestations "Desc" desc
+  verifyLocalAttestations "Name" name
+  verifyLocalAttestations "Desc" desc
   where
     verifyField :: String -> (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
     verifyField name field = maybe (Left $ name <> " missing") Right $ field $ _withOwnership_value record
@@ -220,6 +233,25 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
     InputSourceStdin -> do
       input <- B.getContents
       parseJSON $ A.eitherDecode input
+    InputSourceCBORJson (CBORInfo fname hashFn) -> do
+      inputOrError <- A.eitherDecodeFileStrict fname
+      preimage <- dieOnLeft "Parsing CBOR data" $ inputOrError >>= \case
+        A.Object obj -> do
+          case HM.lookup "cborHex" obj of
+            Just (A.String txt) -> Right txt
+            _ -> Left "JSON misformatted"
+        _ -> Left "JSON contained no object"
+      let preimageWithFn = Preimage
+            { _preimage_hashFn = T.pack hashFn
+            , _preimage_preimage = preimage
+            }
+      subject <- dieOnLeft "Hashing preimage" $ hashPreimage preimageWithFn
+      pure $ WithOwnership Nothing $ GoguenRegistryEntry
+        { _goguenRegistryEntry_subject = Just subject
+        , _goguenRegistryEntry_name = Nothing
+        , _goguenRegistryEntry_description = Nothing
+        , _goguenRegistryEntry_preimage = Just preimageWithFn
+        }
     InputSourceFile fInfo@(FileInfo _ EntryOperationRevise _) -> do
       let dfn = draftFilename fInfo
       exists <- doesFileExist $ draftFilename fInfo
@@ -269,6 +301,12 @@ handleEntryUpdateArguments (EntryUpdateArguments inputInfo attestKeyFile attestP
         DraftStatusDraft -> pure ()
     InputSourceStdin -> do
       putStr outputString
+    InputSourceCBORJson _ -> do
+      subj <- dieOnLeft "Finding subject" $ case newRecordWithOwnership of
+        WithOwnership _ (GoguenRegistryEntry (Just (Subject subj)) _ _ _) -> pure subj
+        _ -> Left "No subject set"
+      let fname = draftFilename $ FileInfo (T.unpack subj) EntryOperationInitialize DraftStatusDraft
+      writeFile fname outputString
 
   exitSuccess
   where
@@ -306,13 +344,13 @@ handleKeyGeneration (KeyGenerationArguments fname) = do
 
   writeKeyFile pubKeyname $ encodeVerKeyDSIGN @Ed25519DSIGN pubKey
   writeKeyFile privKeyName $ encodeSignKeyDSIGN @Ed25519DSIGN signKey
-  where
-    writeKeyFile :: FilePath -> Encoding -> IO ()
-    writeKeyFile fname enc = do
-      exists <- doesFileExist fname
-      if exists
-        then die $ T.pack $ "File already exists: " <> fname
-        else B.writeFile fname $ serializeEncoding enc
+
+writeKeyFile :: FilePath -> Encoding -> IO ()
+writeKeyFile fname enc = do
+  exists <- doesFileExist fname
+  if exists
+    then die $ T.pack $ "File already exists: " <> fname
+    else B.writeFile fname $ serializeEncoding enc
 
 argumentParser :: Maybe String -> OA.Parser Arguments
 argumentParser defaultSubject = (ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject) <|>
