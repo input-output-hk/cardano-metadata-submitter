@@ -34,6 +34,7 @@ module Cardano.Metadata.Types
   , OwnershipSignature (..)
   , HashesForOwnership (..)
   , hashesForOwnership
+  , Logo (..)
   , ownershipDigest
   , makeOwnershipSignature
   , WithOwnership (..)
@@ -46,6 +47,8 @@ import Cardano.Prelude
 import Control.Category (id)
 import Control.Monad.Fail
 import qualified Data.Aeson as A
+import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString.Base64 as B64
 import qualified Data.Aeson.Types as A hiding (parseEither)
 import qualified Data.Map as Map
 import Data.Tagged
@@ -245,6 +248,14 @@ instance WellKnownProperty Preimage where
             , _preimage_preimage = preimage
             }
      in jsonParser . propertyValueToJson
+
+data Logo = Logo
+  { _logo_png_contents :: LB.ByteString
+  } deriving Show
+
+instance WellKnownProperty Logo where
+  wellKnownPropertyName _ = Property "logo"
+  parseWellKnown = A.withText "logo" (either fail pure . fmap (Logo . LB.fromStrict) . B64.decode . T.encodeUtf8) . propertyValueToJson
 
 -- | The goguen-metadata-registry determines ownership by signing entries
 -- with Ed25519.

@@ -38,3 +38,6 @@ genName = genWellKnownText
 
 genDescription :: Gen (WellKnown Description)
 genDescription = genWellKnownText
+
+genLogo :: Gen (WellKnown Logo)
+genLogo = genWellKnownText

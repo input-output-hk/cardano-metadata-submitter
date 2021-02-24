@@ -8,7 +8,9 @@
 module Cardano.Metadata.GoguenRegistry where
 
 import Cardano.Prelude
+import Prelude (String)
 
+import Control.Arrow (left)
 import Control.Category
 import Control.Monad.Fail
 import qualified Data.Aeson as A
@@ -37,11 +39,13 @@ data GoguenRegistryEntry f = GoguenRegistryEntry
   --   subject and the field and thus already include the subject in the hash.
   , _goguenRegistryEntry_name :: f (Attested (WellKnown Name))
   , _goguenRegistryEntry_description :: f (Attested (WellKnown Description))
+  , _goguenRegistryEntry_logo :: f (Attested (WellKnown Logo)) -- This is optional, others are mandatory
+                                                               -- TODO: Maybe model that better
   , _goguenRegistryEntry_preimage :: f Preimage
   -- ^ The preimage is not attested because it is directly verifiable.
   }
 
-deriving instance (Show (f Subject), Show (f (Attested (WellKnown Name))), Show (f (Attested (WellKnown Description))), Show (f Preimage)) => Show (GoguenRegistryEntry f)
+deriving instance (Show (f Subject), Show (f (Attested (WellKnown Name))), Show (f (Attested (WellKnown Description))), Show (f Preimage), Show (f (Attested (WellKnown Logo)))) => Show (GoguenRegistryEntry f)
 
 type CompleteGoguenRegistryEntry = GoguenRegistryEntry Identity
 type PartialGoguenRegistryEntry = GoguenRegistryEntry Maybe
@@ -53,6 +57,7 @@ completeToPartialRegistryEntry e = GoguenRegistryEntry
   { _goguenRegistryEntry_subject = Just $ runIdentity $ _goguenRegistryEntry_subject e
   , _goguenRegistryEntry_name = Just $ runIdentity $ _goguenRegistryEntry_name e
   , _goguenRegistryEntry_description = Just $ runIdentity $ _goguenRegistryEntry_description e
+  , _goguenRegistryEntry_logo = Just $ runIdentity $ _goguenRegistryEntry_logo e
   , _goguenRegistryEntry_preimage = Just $ runIdentity $ _goguenRegistryEntry_preimage e
   }
 
@@ -63,6 +68,7 @@ partialToCompleteRegistryEntry e = GoguenRegistryEntry
   <$> fmap Identity (_goguenRegistryEntry_subject e)
   <*> fmap Identity (_goguenRegistryEntry_name e)
   <*> fmap Identity (_goguenRegistryEntry_description e)
+  <*> fmap Identity (_goguenRegistryEntry_logo e)
   <*> fmap Identity (_goguenRegistryEntry_preimage e)
 
 data SupportedPreimageHash h where
@@ -94,7 +100,7 @@ withSupportedPreimageHash
   :: Some SupportedPreimageHash
   -> (forall h. HashAlgorithm h => SupportedPreimageHash h -> x)
   -> x
-withSupportedPreimageHash some k = case some of
+withSupportedPreimageHash sm k = case sm of
   Some sh -> case sh of
     h@(SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) -> k h
     h@(SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) -> k h
@@ -108,9 +114,11 @@ parseRegistryEntry = A.withObject "GoguenRegistryEntry" $ \o -> do
   nameField <- o A..:? "name"
   descriptionField <- o A..:? "description"
   preimageField <- o A..:? "preImage"
+  logoField <- o A..:? "logo"
   ownershipField <- o A..:? "owner"
   nameAnn <- mapM (parseWithAttestation parseWellKnownGoguen) nameField
   descAnn <- mapM (parseWithAttestation parseWellKnownGoguen) descriptionField
+  logo <- mapM (parseWithAttestation parseWellKnownGoguen) logoField
   preimage <- mapM parseRegistryPreimage preimageField
   owner <- mapM (parseAnnotatedSignature OwnershipSignature) ownershipField
   pure $ WithOwnership
@@ -118,6 +126,7 @@ parseRegistryEntry = A.withObject "GoguenRegistryEntry" $ \o -> do
       { _goguenRegistryEntry_subject = Subject <$> subject
       , _goguenRegistryEntry_name = nameAnn
       , _goguenRegistryEntry_description = descAnn
+      , _goguenRegistryEntry_logo = logo
       , _goguenRegistryEntry_preimage = preimage
       }
     , _withOwnership_owner = owner
@@ -185,8 +194,8 @@ verifyPreimage
   => Subject
   -> Preimage
   -> Either s ()
-verifyPreimage (Subject subject) preimage =
-  case T.decodeHex subject of
+verifyPreimage (Subject subjectHex) preimage =
+  case T.decodeHex subjectHex of
     Nothing -> Left "Subject is not a byte string"
     Just subject -> do
       hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
@@ -207,6 +216,27 @@ verifyPreimage (Subject subject) preimage =
           case hasher preimageBytes == subject of
             False -> Left "Hashed preimage does not equal subject"
             True -> pure ()
+
+hashPreimage
+  :: (Monoid s, IsString s)
+  => Preimage
+  -> Either s Subject
+hashPreimage preimage = do
+  hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
+    Right (Some h) -> Right $ case h of
+      (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+      (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+      (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
+        hashToBytes . hashWith @h id
+    Left () -> Left $ mconcat
+      [ "Hash function not supported. Supported functions: "
+      , "sha256, blake2b-256, blake2b-224"
+      ]
+  case T.decodeHex (_preimage_preimage preimage) of
+    Nothing -> Left "Preimage is not a byte string"
+    Just preimageBytes -> pure $ Subject $ T.encodeHex $ hasher preimageBytes
 
 verifyAttestations
   :: CompleteGoguenRegistryEntry
@@ -239,16 +269,28 @@ registryHashesForOwnership s ps = HashesForOwnership
   }
 
 verifyRegistryOwnership
-  :: WithOwnership Identity CompleteGoguenRegistryEntry
-  -> Either () ()
-verifyRegistryOwnership ownedEntry = verifyOwnership $ flip fmap ownedEntry $ \entry ->
-  let Identity subject = _goguenRegistryEntry_subject entry
-      Identity name = _goguenRegistryEntry_name entry
-      Identity description = _goguenRegistryEntry_description entry
-   in registryHashesForOwnership subject $ Map.fromList
+  :: WithOwnership Maybe PartialGoguenRegistryEntry
+  -> Either String ()
+verifyRegistryOwnership ownedEntry = do
+  let grabMaybe field = \case
+        Just x -> pure x
+        Nothing -> Left $ "Verifying owner signature: missing: " <> field
+      entry :: PartialGoguenRegistryEntry = _withOwnership_value ownedEntry
+  subject <- grabMaybe "subject" $ _goguenRegistryEntry_subject entry
+  name <- grabMaybe "name" $ _goguenRegistryEntry_name entry
+  description <- grabMaybe "description" $ _goguenRegistryEntry_description entry
+  owner <- grabMaybe "owner signature" $ _withOwnership_owner ownedEntry
+  case _goguenRegistryEntry_logo entry of
+    Just _ -> Left "Currently, owner signatures are not supported on records with logos"
+    Nothing -> Right ()
+  let hashes = registryHashesForOwnership subject $ Map.fromList
         [ withWellKnown (_attested_property name) $ \p _ -> (p, fmap _wellKnown_raw name)
         , withWellKnown (_attested_property description) $ \p _ -> (p, fmap _wellKnown_raw description)
         ]
+  left (const "Ownership signature did not verify") $ verifyOwnership $ WithOwnership
+    { _withOwnership_owner = Identity owner
+    , _withOwnership_value = hashes
+    }
 
 serializeRegistryEntry
   :: WithOwnership Maybe PartialGoguenRegistryEntry
@@ -264,6 +306,8 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
       attested prettyWellKnown name
   , flip fmap (_goguenRegistryEntry_description entry') $ \description -> objField "description" $
       attested prettyWellKnown description
+  , flip fmap (_goguenRegistryEntry_logo entry') $ \logo -> objField "logo" $
+      attested prettyWellKnown logo
   , flip fmap (_withOwnership_owner entry) $ \owner -> objField "owner" $
       ownership owner
   ]
