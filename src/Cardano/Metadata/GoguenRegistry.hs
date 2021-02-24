@@ -1,5 +1,4 @@
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -19,60 +18,38 @@ import Cardano.Crypto.DSIGN.Class
     , rawSerialiseSigDSIGN
     , rawSerialiseVerKeyDSIGN
     )
-import Cardano.Crypto.Hash
-    ( Blake2b_224
-    , Blake2b_256
-    , HashAlgorithm (..)
-    , SHA256
-    , hashToBytes
-    , hashWith
-    )
 import Cardano.Metadata.Types
     ( AttestationSignature (..)
     , Attested (..)
     , Description (..)
-    , HashesForOwnership (..)
+    , Logo (..)
     , Logo (..)
     , Name (..)
-    , OwnershipSignature (..)
-    , Preimage (..)
+    , Policy (..)
     , Property (..)
-    , PropertyValue (..)
     , Subject (..)
+    , Ticker (..)
+    , Unit (..)
+    , Url (..)
     , WellKnown (..)
     , WellKnownProperty (..)
-    , WithOwnership (..)
-    , hashProperty
-    , hashPropertyValue
-    , hashSubject
     , hashesForAttestation
     , propertyValueFromString
     , propertyValueToString
     , verifyAttested
-    , verifyOwnership
     , withWellKnown
     )
-import Control.Arrow
-    ( left )
-import Control.Category
-    ( id )
 import Control.Monad.Fail
     ( fail )
 import Data.Aeson
     ( (.:), (.:?) )
-import Data.Some
-    ( Some (..) )
-import Data.Tagged
-    ( Tagged (..) )
 import Prelude
-    ( String )
+    ( error )
 
 import qualified AesonHelpers
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.Map as Map
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import qualified Prettyprinter as PP
 import qualified Text.Hex as T
 
@@ -81,23 +58,31 @@ import qualified Text.Hex as T
 -- It is parameterized so that we can handle partially constructed entries.
 data GoguenRegistryEntry f = GoguenRegistryEntry
     { _goguenRegistryEntry_subject :: f Subject
-    -- ^ The subject is not attested because it would not make sense to:
-    --   attestations attest to the relationship between the
-    --   subject and the field and thus already include the subject in the hash.
+    , _goguenRegistryEntry_policy :: f Policy
+    -- ^ Neither the policy nor The subject are attested.
+    --   Attestations attest to the relationship between the subject and the
+    --   field and thus already include the subject in the hash. The policy
+    --   itself is used to verify attestations.
+
     , _goguenRegistryEntry_name :: f (Attested (WellKnown Name))
     , _goguenRegistryEntry_description :: f (Attested (WellKnown Description))
-    , _goguenRegistryEntry_logo :: f (Attested (WellKnown Logo)) -- This is optional, others are mandatory
-                                                                 -- TODO: Maybe model that better
-    , _goguenRegistryEntry_preimage :: f Preimage
-    -- ^ The preimage is not attested because it is directly verifiable.
+
+    -- Fields below are optional.
+    , _goguenRegistryEntry_logo :: f (Attested (WellKnown Logo))
+    , _goguenRegistryEntry_url :: f (Attested (WellKnown Url))
+    , _goguenRegistryEntry_unit :: f (Attested (WellKnown Unit))
+    , _goguenRegistryEntry_ticker :: f (Attested (WellKnown Ticker))
     }
 
 deriving instance
     ( Show (f Subject)
+    , Show (f Policy)
     , Show (f (Attested (WellKnown Name)))
     , Show (f (Attested (WellKnown Description)))
-    , Show (f Preimage)
     , Show (f (Attested (WellKnown Logo)))
+    , Show (f (Attested (WellKnown Url)))
+    , Show (f (Attested (WellKnown Unit)))
+    , Show (f (Attested (WellKnown Ticker)))
     ) => Show (GoguenRegistryEntry f)
 
 type CompleteGoguenRegistryEntry = GoguenRegistryEntry Identity
@@ -107,11 +92,22 @@ completeToPartialRegistryEntry
     :: CompleteGoguenRegistryEntry
     -> PartialGoguenRegistryEntry
 completeToPartialRegistryEntry e = GoguenRegistryEntry
-    { _goguenRegistryEntry_subject = Just $ runIdentity $ _goguenRegistryEntry_subject e
-    , _goguenRegistryEntry_name = Just $ runIdentity $ _goguenRegistryEntry_name e
-    , _goguenRegistryEntry_description = Just $ runIdentity $ _goguenRegistryEntry_description e
-    , _goguenRegistryEntry_logo = Just $ runIdentity $ _goguenRegistryEntry_logo e
-    , _goguenRegistryEntry_preimage = Just $ runIdentity $ _goguenRegistryEntry_preimage e
+    { _goguenRegistryEntry_subject =
+        Just $ runIdentity $ _goguenRegistryEntry_subject e
+    , _goguenRegistryEntry_policy =
+        Just $ runIdentity $ _goguenRegistryEntry_policy e
+    , _goguenRegistryEntry_name =
+        Just $ runIdentity $ _goguenRegistryEntry_name e
+    , _goguenRegistryEntry_description =
+        Just $ runIdentity $ _goguenRegistryEntry_description e
+    , _goguenRegistryEntry_logo =
+        Just $ runIdentity $ _goguenRegistryEntry_logo e
+    , _goguenRegistryEntry_url =
+        Just $ runIdentity $ _goguenRegistryEntry_url e
+    , _goguenRegistryEntry_unit =
+        Just $ runIdentity $ _goguenRegistryEntry_unit e
+    , _goguenRegistryEntry_ticker =
+        Just $ runIdentity $ _goguenRegistryEntry_ticker e
     }
 
 partialToCompleteRegistryEntry
@@ -119,71 +115,47 @@ partialToCompleteRegistryEntry
     -> Maybe CompleteGoguenRegistryEntry
 partialToCompleteRegistryEntry e = GoguenRegistryEntry
     <$> fmap Identity (_goguenRegistryEntry_subject e)
+    <*> fmap Identity (_goguenRegistryEntry_policy e)
     <*> fmap Identity (_goguenRegistryEntry_name e)
     <*> fmap Identity (_goguenRegistryEntry_description e)
     <*> fmap Identity (_goguenRegistryEntry_logo e)
-    <*> fmap Identity (_goguenRegistryEntry_preimage e)
-
-data SupportedPreimageHash h where
-    SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash Blake2b_256
-    SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash Blake2b_224
-    SupportedPreimageHash_SHA256 :: SupportedPreimageHash SHA256
-
-toHashFnIdentifier
-    :: SupportedPreimageHash h
-    -> Text
-toHashFnIdentifier = \case
-    SupportedPreimageHash_Blake2b_256 -> "blake2b-256"
-    SupportedPreimageHash_Blake2b_224 -> "blake2b-224"
-    SupportedPreimageHash_SHA256 -> "sha256"
-
-fromHashFnIdentifier
-    :: Text
-    -> Either () (Some SupportedPreimageHash)
-fromHashFnIdentifier fn
-    | fn == "blake2b-256" = Right $ Some
-        SupportedPreimageHash_Blake2b_256
-    | fn == "blake2b-224" = Right $ Some
-        SupportedPreimageHash_Blake2b_224
-    | fn == "sha256" = Right $ Some
-        SupportedPreimageHash_SHA256
-    | otherwise = Left ()
-
-withSupportedPreimageHash
-  :: Some SupportedPreimageHash
-  -> (forall h. HashAlgorithm h => SupportedPreimageHash h -> x)
-  -> x
-withSupportedPreimageHash sm k = case sm of
-    Some sh -> case sh of
-        h@(SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) -> k h
-        h@(SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) -> k h
-        h@(SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) -> k h
+    <*> fmap Identity (_goguenRegistryEntry_url e)
+    <*> fmap Identity (_goguenRegistryEntry_unit e)
+    <*> fmap Identity (_goguenRegistryEntry_ticker e)
 
 parseRegistryEntry
     :: Aeson.Value
-    -> Aeson.Parser (WithOwnership Maybe PartialGoguenRegistryEntry)
+    -> Aeson.Parser PartialGoguenRegistryEntry
 parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
+    -- FIXME: Have proper parser for subject and policy. We expect both to be
+    -- hex-encoded strings.
     subject <- o .:? "subject"
-    nameField <- o .:? "name"
-    descriptionField <- o .:? "description"
-    preimageField <- o .:? "preImage"
-    logoField <- o .:? "logo"
-    ownershipField <- o .:? "owner"
-    nameAnn <- mapM (parseWithAttestation parseWellKnownGoguen) nameField
-    descAnn <- mapM (parseWithAttestation parseWellKnownGoguen) descriptionField
-    logo <- mapM (parseWithAttestation parseWellKnownGoguen) logoField
-    preimage <- mapM parseRegistryPreimage preimageField
-    owner <- mapM (parseAnnotatedSignature OwnershipSignature) ownershipField
-    pure $ WithOwnership
-        { _withOwnership_value = GoguenRegistryEntry
-            { _goguenRegistryEntry_subject = Subject <$> subject
-            , _goguenRegistryEntry_name = nameAnn
-            , _goguenRegistryEntry_description = descAnn
-            , _goguenRegistryEntry_logo = logo
-            , _goguenRegistryEntry_preimage = preimage
-            }
-      , _withOwnership_owner = owner
-      }
+    policy  <- o .:? "policy"
+
+    nameField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Name)
+    descField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Description)
+    logoField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Logo)
+    urlField    <- o .:? unProperty (wellKnownPropertyName $ Proxy @Url)
+    unitField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Unit)
+    tickerField <- o .:? unProperty (wellKnownPropertyName $ Proxy @Ticker)
+
+    nameAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) nameField
+    descAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) descField
+    logoAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) logoField
+    urlAnn    <- mapM (parseWithAttestation parseWellKnownGoguen) urlField
+    unitAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) unitField
+    tickerAnn <- mapM (parseWithAttestation parseWellKnownGoguen) tickerField
+
+    pure $ GoguenRegistryEntry
+        { _goguenRegistryEntry_subject = Subject <$> subject
+        , _goguenRegistryEntry_policy  = Policy <$> policy
+        , _goguenRegistryEntry_name = nameAnn
+        , _goguenRegistryEntry_description = descAnn
+        , _goguenRegistryEntry_logo = logoAnn
+        , _goguenRegistryEntry_url = urlAnn
+        , _goguenRegistryEntry_unit = unitAnn
+        , _goguenRegistryEntry_ticker = tickerAnn
+        }
 
 -- | The registry encodes "name" and "description" differently from the CIP.
 -- in particular `{ "value": "Foo" }` instead of `{ "value" : "\"Foo\"" }`.
@@ -199,20 +171,6 @@ parseWellKnownGoguen =
                 Right v -> WellKnown v <$> parseWellKnown v
     in
         Aeson.withText "property value" parse
-
-parseRegistryPreimage
-    :: Aeson.Value
-    -> Aeson.Parser Preimage
-parseRegistryPreimage = Aeson.withObject "preImage" $ \o -> do
-    hashFn <- Aeson.prependFailure "preimage " $
-        o .: "hashFn"
-    preimage <- Aeson.prependFailure "preimage " $
-        o .: "value"
-    AesonHelpers.noOtherFields "preimage" o ["hashFn", "value"]
-    pure $ Preimage
-        { _preimage_hashFn = hashFn
-        , _preimage_preimage = preimage
-        }
 
 parseWithAttestation
     :: (Aeson.Value -> Aeson.Parser a)
@@ -244,56 +202,60 @@ parseAnnotatedSignature f o = do
     AesonHelpers.noOtherFields "annotated signature" o ["publicKey", "signature"]
     pure $ f publicKey signature
 
-verifyPreimage
+-- | The subject is made of the concatenation of the policy id and asset name. The
+-- asset name is potentially empty. Therefore, the first 28 bytes of the subject
+-- are the policy id.
+verifyPolicy
     :: (Monoid s, IsString s)
     => Subject
-    -> Preimage
+    -> Policy
     -> Either s ()
-verifyPreimage (Subject subjectHex) preimage =
-    case T.decodeHex subjectHex of
-        Nothing ->
-            Left "Subject is not a byte string"
-        Just subject -> do
-            hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
-                Right (Some h) -> Right $ case h of
-                    (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
-                        hashToBytes . hashWith @h id
-                    (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
-                        hashToBytes . hashWith @h id
-                    (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
-                        hashToBytes . hashWith @h id
-                Left () -> Left $ mconcat
-                    [ "Hash function not supported. Supported functions: "
-                    , "sha256, blake2b-256, blake2b-224"
-                    ]
-            case T.decodeHex (_preimage_preimage preimage) of
-                Nothing ->
-                    Left "Preimage is not a byte string"
-                Just preimageBytes -> do
-                    if hasher preimageBytes == subject
-                    then pure ()
-                    else Left "Hashed preimage does not equal subject"
-
-hashPreimage
-  :: (Monoid s, IsString s)
-  => Preimage
-  -> Either s Subject
-hashPreimage preimage = do
-    hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
-        Right (Some h) -> Right $ case h of
-            (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
-                hashToBytes . hashWith @h id
-            (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
-                hashToBytes . hashWith @h id
-            (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
-                hashToBytes . hashWith @h id
-        Left () -> Left $ mconcat
-            [ "Hash function not supported. Supported functions: "
-            , "sha256, blake2b-256, blake2b-224"
-            ]
-    case T.decodeHex (_preimage_preimage preimage) of
-        Nothing -> Left "Preimage is not a byte string"
-        Just preimageBytes -> pure $ Subject $ T.encodeHex $ hasher preimageBytes
+verifyPolicy _subject _policy =
+    error "FIXME: verifyPolicy"
+--    case T.decodeHex subjectHex of
+--        Nothing ->
+--            Left "Subject is not a byte string"
+--        Just subject -> do
+--            hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
+--                Right (Some h) -> Right $ case h of
+--                    (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
+--                        hashToBytes . hashWith @h id
+--                    (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
+--                        hashToBytes . hashWith @h id
+--                    (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
+--                        hashToBytes . hashWith @h id
+--                Left () -> Left $ mconcat
+--                    [ "Hash function not supported. Supported functions: "
+--                    , "sha256, blake2b-256, blake2b-224"
+--                    ]
+--            case T.decodeHex (_preimage_preimage preimage) of
+--                Nothing ->
+--                    Left "Preimage is not a byte string"
+--                Just preimageBytes -> do
+--                    if hasher preimageBytes == subject
+--                    then pure ()
+--                    else Left "Hashed preimage does not equal subject"
+--
+--hashPreimage
+--  :: (Monoid s, IsString s)
+--  => Preimage
+--  -> Either s Subject
+--hashPreimage preimage = do
+--    hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
+--        Right (Some h) -> Right $ case h of
+--            (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
+--                hashToBytes . hashWith @h id
+--            (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
+--                hashToBytes . hashWith @h id
+--            (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
+--                hashToBytes . hashWith @h id
+--        Left () -> Left $ mconcat
+--            [ "Hash function not supported. Supported functions: "
+--            , "sha256, blake2b-256, blake2b-224"
+--            ]
+--    case T.decodeHex (_preimage_preimage preimage) of
+--        Nothing -> Left "Preimage is not a byte string"
+--        Just preimageBytes -> pure $ Subject $ T.encodeHex $ hasher preimageBytes
 
 verifyAttestations
     :: CompleteGoguenRegistryEntry
@@ -306,70 +268,29 @@ verifyAttestations entry = do
     _ <- verifyAttested $ fmap (`withWellKnown` (hashesForAttestation subject)) description
     pure ()
 
--- | The goguen metadata registry does something slightly different to compute the ownership hash.
--- namely, it interprets the attestation signatures as hexademical strings and encodes them into UTF-8
--- instead of hashing their bytestring representation direcctly.
-registryHashesForOwnership
-    :: Subject
-    -> Map Property (Attested PropertyValue)
-    -> HashesForOwnership
-registryHashesForOwnership s ps = HashesForOwnership
-    { _hashesForOwnership_subject = hashSubject s
-    , _hashesForOwnership_properties = flip Map.mapWithKey ps $ \p av ->
-            ( hashProperty p
-            , hashPropertyValue (_attested_property av)
-            , Map.fromList $ flip fmap (_attested_signatures av) $ \sig ->
-                ( Tagged (rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey sig))
-                , hashWith (T.encodeUtf8 . T.encodeHex . rawSerialiseSigDSIGN) (_attestationSignature_signature sig)
-                )
-            )
-    }
-
-verifyRegistryOwnership
-  :: WithOwnership Maybe PartialGoguenRegistryEntry
-  -> Either String ()
-verifyRegistryOwnership ownedEntry = do
-    let grabMaybe field = \case
-            Just x -> pure x
-            Nothing -> Left $ "Verifying owner signature: missing: " <> field
-    let entry :: PartialGoguenRegistryEntry = _withOwnership_value ownedEntry
-    subject <- grabMaybe "subject" $ _goguenRegistryEntry_subject entry
-    name <- grabMaybe "name" $ _goguenRegistryEntry_name entry
-    description <- grabMaybe "description" $ _goguenRegistryEntry_description entry
-    owner <- grabMaybe "owner signature" $ _withOwnership_owner ownedEntry
-    case _goguenRegistryEntry_logo entry of
-        Just _ -> Left "Currently, owner signatures are not supported on records with logos"
-        Nothing -> Right ()
-    let hashes = registryHashesForOwnership subject $ Map.fromList
-          [ withWellKnown (_attested_property name) $ \p _ -> (p, fmap _wellKnown_raw name)
-          , withWellKnown (_attested_property description) $ \p _ -> (p, fmap _wellKnown_raw description)
-          ]
-    left (const "Ownership signature did not verify") $ verifyOwnership $ WithOwnership
-        { _withOwnership_owner = Identity owner
-        , _withOwnership_value = hashes
-        }
-
+-- FIXME: Replace this with generics...
 serializeRegistryEntry
-    :: WithOwnership Maybe PartialGoguenRegistryEntry
+    :: PartialGoguenRegistryEntry
     -> PP.Doc ann
 serializeRegistryEntry entry = encloseObj $ catMaybes
-    [ flip fmap (_goguenRegistryEntry_subject entry') $ \subject -> objField "subject" $
+    [ flip fmap (_goguenRegistryEntry_subject entry) $ \subject -> objField "subject" $
         PP.dquotes $ PP.pretty $ unSubject subject
-    , flip fmap (_goguenRegistryEntry_preimage entry') $ \preimage -> objField "preImage" $ encloseObj $
-        [ objField "value" $ PP.dquotes (PP.pretty (_preimage_preimage preimage))
-        , objField "hashFn" $ PP.dquotes (PP.pretty (_preimage_hashFn preimage))
-        ]
-    , flip fmap (_goguenRegistryEntry_name entry') $ \name -> objField "name" $
+    , flip fmap (_goguenRegistryEntry_policy entry) $ \policy -> objField "policy" $
+        PP.dquotes $ PP.pretty $ unPolicy policy
+    , flip fmap (_goguenRegistryEntry_name entry) $ \name -> objField "name" $
         attested prettyWellKnown name
-    , flip fmap (_goguenRegistryEntry_description entry') $ \description -> objField "description" $
+    , flip fmap (_goguenRegistryEntry_description entry) $ \description -> objField "description" $
         attested prettyWellKnown description
-    , flip fmap (_goguenRegistryEntry_logo entry') $ \logo -> objField "logo" $
+    , flip fmap (_goguenRegistryEntry_logo entry) $ \logo -> objField "logo" $
         attested prettyWellKnown logo
-    , flip fmap (_withOwnership_owner entry) $ \owner -> objField "owner" $
-        ownership owner
+    , flip fmap (_goguenRegistryEntry_url entry) $ \url -> objField "url" $
+        attested prettyWellKnown url
+    , flip fmap (_goguenRegistryEntry_unit entry) $ \unit_ -> objField "unit" $
+        attested prettyWellKnown unit_
+    , flip fmap (_goguenRegistryEntry_ticker entry) $ \ticker -> objField "ticker" $
+        attested prettyWellKnown ticker
     ]
  where
-    entry' = _withOwnership_value entry
     prettyBytes = PP.dquotes . PP.pretty . T.encodeHex
     prettyWellKnown = PP.pretty . propertyValueToString . _wellKnown_raw
     encloseObj fs = PP.vcat
@@ -394,10 +315,4 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
             _attestationSignature_publicKey s
         , objField "signature" $ prettyBytes $ rawSerialiseSigDSIGN $
             _attestationSignature_signature s
-        ]
-    ownership s = encloseObj
-        [ objField "publicKey" $ prettyBytes $ rawSerialiseVerKeyDSIGN $
-            _ownershipSignature_publicKey s
-        , objField "signature" $ prettyBytes $ rawSerialiseSigDSIGN $
-            _ownershipSignature_signature s
         ]

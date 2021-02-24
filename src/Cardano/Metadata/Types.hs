@@ -2,10 +2,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Cardano.Metadata.Types
     ( Subject (..)
     , hashSubject
+    , Policy (..)
+    , hashPolicy
     , Property (..)
     , hashProperty
     , PropertyValue (..)
@@ -28,16 +31,10 @@ module Cardano.Metadata.Types
     , withWellKnown
     , Name (..)
     , Description (..)
-    , Preimage (..)
-    , OwnershipSignature (..)
-    , HashesForOwnership (..)
-    , hashesForOwnership
     , Logo (..)
-    , ownershipDigest
-    , makeOwnershipSignature
-    , WithOwnership (..)
-    , partialToCompleteOwnership
-    , verifyOwnership
+    , Url(..)
+    , Ticker(..)
+    , Unit(..)
     ) where
 
 import Cardano.Prelude
@@ -48,30 +45,27 @@ import Cardano.Crypto.DSIGN
     , SignKeyDSIGN
     , VerKeyDSIGN
     , deriveVerKeyDSIGN
-    , rawSerialiseSigDSIGN
-    , rawSerialiseVerKeyDSIGN
     , signDSIGN
     , verifyDSIGN
     )
 import Cardano.Crypto.Hash
-    ( Blake2b_256, Hash, castHash, hashToBytes, hashWith )
+    ( Blake2b_224, Blake2b_256, Hash, castHash, hashToBytes, hashWith )
 import Control.Category
     ( id )
 import Control.Monad.Fail
     ( fail )
 import Data.Aeson
     ( (.:) )
-import Data.Tagged
-    ( Tagged (..) )
 import Data.Text
     ( Text )
+import Network.URI
+    ( URI (..), parseAbsoluteURI )
 
 import qualified AesonHelpers
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.Map as Map
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 
@@ -80,6 +74,12 @@ newtype Subject = Subject { unSubject :: Text }
 
 hashSubject :: Subject -> Hash Blake2b_256 Subject
 hashSubject = hashWith (T.encodeUtf8 . unSubject)
+
+newtype Policy = Policy { unPolicy :: Text }
+    deriving Show
+
+hashPolicy :: Policy -> Hash Blake2b_224 Policy
+hashPolicy = hashWith (T.encodeUtf8 . unPolicy)
 
 newtype Property = Property { unProperty :: Text }
     deriving (Show, Eq, Ord)
@@ -232,7 +232,8 @@ newtype Name = Name { unName :: Text }
 
 instance WellKnownProperty Name where
     wellKnownPropertyName _ = Property "name"
-    parseWellKnown = Aeson.withText "name" (pure . Name) . propertyValueToJson
+    parseWellKnown = Aeson.withText "name"
+        validateMetadataName . propertyValueToJson
 
 -- | "description" is a well-known property whose value must be a string
 newtype Description = Description { unDescription :: Text }
@@ -240,33 +241,8 @@ newtype Description = Description { unDescription :: Text }
 
 instance WellKnownProperty Description where
     wellKnownPropertyName _ = Property "description"
-    parseWellKnown = Aeson.withText "description" (pure . Description) . propertyValueToJson
-
--- | "preimage" is a well-known property whose value must be a record two
--- fields: "hashFn" which names the hash function used to derive the metadata
--- subject and "preimage" which is the preimage of the hash subject under that
--- hash function.
---
--- NB: Metadata subjects are frequently, but not always, hashes
-data Preimage = Preimage
-    { _preimage_preimage :: Text
-    , _preimage_hashFn :: Text
-    } deriving Show
-
-instance WellKnownProperty Preimage where
-    wellKnownPropertyName _ = Property "preimage"
-    parseWellKnown =
-        let
-            jsonParser = Aeson.withObject "preimage" $ \o -> do
-                hashFn <- Aeson.prependFailure "preimage " $ o .: "hashFn"
-                preimage <- Aeson.prependFailure "preimage " $ o .: "preimage"
-                AesonHelpers.noOtherFields "preimage" o ["hashFn", "preimage"]
-                pure $ Preimage
-                    { _preimage_hashFn = hashFn
-                    , _preimage_preimage = preimage
-                    }
-         in
-            jsonParser . propertyValueToJson
+    parseWellKnown = Aeson.withText "description"
+        validateMetadataDescription . propertyValueToJson
 
 data Logo = Logo
     { _logo_png_contents :: BL.ByteString
@@ -275,99 +251,93 @@ data Logo = Logo
 instance WellKnownProperty Logo where
     wellKnownPropertyName _ = Property "logo"
     parseWellKnown = Aeson.withText "logo"
-        (either fail (pure . Logo . BL.fromStrict) . B64.decode . T.encodeUtf8) . propertyValueToJson
+        (either fail (validateMetadataLogo . BL.fromStrict) . B64.decode . T.encodeUtf8) .  propertyValueToJson
 
--- | The goguen-metadata-registry determines ownership by signing entries
--- with Ed25519.
-data OwnershipSignature = OwnershipSignature
-    { _ownershipSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
-    , _ownershipSignature_signature :: SigDSIGN Ed25519DSIGN
+newtype Url = Url
+    { unUrl :: URI
     } deriving Show
 
--- | Ownership signatures are hash( hash(subject)
--- + hash(property_name_1) + hash(property_value_1)
--- + hash(attestation_sig_1_1) + ... + hash(attestation_signature_1_k1)
--- + ... + hash(property_name_n) + hash(property_value_n)
--- + hash(attestation_sig_n_1) + ... + hash(attestation_sig_n_kn)
--- )
+instance WellKnownProperty Url where
+    wellKnownPropertyName _ = Property "url"
+    parseWellKnown = Aeson.withText "url"
+        validateMetadataURL . propertyValueToJson
+
+data Unit = Unit
+    { unitName :: Text
+    , unitDecimals :: Integer
+    } deriving Show
+
+instance WellKnownProperty Unit where
+    wellKnownPropertyName _ = Property "unit"
+    parseWellKnown =
+        Aeson.withObject "unit" parser . propertyValueToJson
+      where
+        parser o = do
+            name <- Aeson.prependFailure "unit" (o .: "name")
+            decimals <- Aeson.prependFailure "unit" (o .: "decimals")
+            AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
+            validateMetadataUnit name decimals
+
+newtype Ticker = Ticker
+    { unTicker :: Text
+    } deriving Show
+
+instance WellKnownProperty Ticker where
+    wellKnownPropertyName _ = Property "ticker"
+    parseWellKnown = Aeson.withText "ticker"
+        validateMetadataTicker . propertyValueToJson
+
+
 --
--- where properties are lexicographically ordered by name and signatures are
--- lexicographically ordered by their attesting key. That's what the 'Map's are for.
-data HashesForOwnership = HashesForOwnership
-    { _hashesForOwnership_subject :: Hash Blake2b_256 Subject
-    , _hashesForOwnership_properties ::
-        Map Property
-            ( Hash Blake2b_256 Property
-            , Hash Blake2b_256 PropertyValue
-            , Map (Tagged (VerKeyDSIGN Ed25519DSIGN) ByteString)
-                  (Hash Blake2b_256 (SigDSIGN Ed25519DSIGN))
-            )
-    } deriving Show
+-- Validators
+--
 
-hashesForOwnership
-    :: Subject
-    -> Map Property (Attested PropertyValue)
-    -> HashesForOwnership
-hashesForOwnership s ps = HashesForOwnership
-    { _hashesForOwnership_subject = hashSubject s
-    , _hashesForOwnership_properties = flip Map.mapWithKey ps $ \p av ->
-            ( hashProperty p
-            , hashPropertyValue (_attested_property av)
-            , Map.fromList $ flip fmap (_attested_signatures av) $ \sig ->
-                ( Tagged (rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey sig))
-                , hashWith rawSerialiseSigDSIGN (_attestationSignature_signature sig)
-                )
-            )
-    }
+validateMinLength :: MonadFail f => Int -> Text -> f Text
+validateMinLength n text
+    | len >= n = pure text
+    | otherwise = fail $ "Length must be at least " ++ show n ++ " characters, got " ++ show len
+  where
+    len = T.length text
 
-ownershipDigest
-    :: HashesForOwnership
-    -> Hash Blake2b_256 HashesForOwnership
-ownershipDigest hashes = castHash $ hashWith id $ mconcat
-    [ hashToBytes $ _hashesForOwnership_subject hashes
-    , mconcat $ flip fmap (Map.toAscList (_hashesForOwnership_properties hashes)) $
-        \(_, (propertyHash, valueHash, keyHashes)) -> mconcat
-            [ hashToBytes propertyHash
-            , hashToBytes valueHash
-            , mconcat $ flip fmap (Map.toAscList keyHashes) $ \(_, sigHash) -> hashToBytes sigHash
-            ]
-    ]
+validateMaxLength :: MonadFail f => Int -> Text -> f Text
+validateMaxLength n text
+    | len <= n = pure text
+    | otherwise = fail $ "Length must be no more than " ++ show n ++ " characters, got " ++ show len
+  where
+    len = T.length text
 
-makeOwnershipSignature
-    :: SignKeyDSIGN Ed25519DSIGN
-    -> HashesForOwnership
-    -> OwnershipSignature
-makeOwnershipSignature signingKey hashes = OwnershipSignature
-    { _ownershipSignature_publicKey = deriveVerKeyDSIGN signingKey
-    , _ownershipSignature_signature = signDSIGN ()
-        (hashToBytes $ ownershipDigest hashes)
-        signingKey
-    }
+validateMetadataName :: MonadFail f => Text -> f Name
+validateMetadataName =  fmap Name .
+    (validateMinLength 1 >=> validateMaxLength 50)
 
-data WithOwnership f a = WithOwnership
-    { _withOwnership_owner :: f OwnershipSignature
-    , _withOwnership_value :: a
-    } deriving (Functor, Foldable, Traversable)
+validateMetadataTicker :: MonadFail f => Text -> f Ticker
+validateMetadataTicker = fmap Ticker .
+    (validateMinLength 2 >=> validateMaxLength 4)
 
-deriving instance (Show (f OwnershipSignature), Show a) => Show (WithOwnership f a)
+validateMetadataDescription :: MonadFail f => Text -> f Description
+validateMetadataDescription = fmap Description .
+    validateMaxLength 500
 
-partialToCompleteOwnership
-    :: WithOwnership Maybe a
-    -> Maybe (WithOwnership Identity a)
-partialToCompleteOwnership e = case _withOwnership_owner e of
-    Nothing -> Nothing
-    Just o -> Just $ WithOwnership
-        { _withOwnership_owner = Identity o
-        , _withOwnership_value = _withOwnership_value e
-        }
+-- | FIXME: validate decimals
+validateMetadataUnit :: MonadFail f => Text -> Integer -> f Unit
+validateMetadataUnit name decimals = Unit name decimals <$
+    (validateMinLength 1 name >>= validateMaxLength 30)
 
-verifyOwnership
-    :: WithOwnership Identity HashesForOwnership
-    -> Either () ()
-verifyOwnership owned = do
-    let hashes = _withOwnership_value owned
-    let Identity owner = _withOwnership_owner owned
-    first (const ()) $ verifyDSIGN ()
-        (_ownershipSignature_publicKey owner)
-        (hashToBytes (ownershipDigest hashes))
-        (_ownershipSignature_signature owner)
+validateMetadataLogo :: MonadFail f => BL.ByteString -> f Logo
+validateMetadataLogo bytes
+    | len <= maxLen = pure (Logo bytes)
+    | otherwise = fail $ "Length must be no more than " ++ show maxLen ++ " bytes, got " ++ show len
+  where
+    len = BL.length bytes
+    maxLen = 65536
+
+validateMetadataURL :: MonadFail f => Text -> f Url
+validateMetadataURL = fmap Url .
+    (validateMaxLength 250 >=> validateURI >=> validateHttps)
+  where
+      validateURI = maybe (fail "Not an absolute URI") pure
+          . parseAbsoluteURI
+          . T.unpack
+      validateHttps u@(uriScheme -> scheme)
+          | scheme == "https:" = pure u
+          | otherwise = fail $ "Scheme must be https: but got " ++ scheme
