@@ -26,7 +26,6 @@ library
                , base64-bytestring
                , bytestring
                , containers
-               , cryptonite
                , hex-text
                , prettyprinter
                , some
@@ -76,11 +75,6 @@ test-suite unit
       -Wall
       -O2
   build-depends: base
-               , cardano-prelude
-               , cardano-metadata-submitter
-               , tasty
-               , tasty-hunit
-               , tasty-quickcheck
   type: exitcode-stdio-1.0
   extra-source-files: test/examples/*
   hs-source-dirs: test/unit

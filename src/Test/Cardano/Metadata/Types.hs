@@ -1,20 +1,32 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+
 module Test.Cardano.Metadata.Types where
 
 import Cardano.Prelude
 
 import Cardano.Crypto.Hash
-import qualified Data.Aeson as A
-import qualified Data.Aeson.Text as A
-import qualified Data.Aeson.Types as A
-import qualified Text.Hex as T
+    ( HashAlgorithm, hashToBytes, hashWith )
+import Cardano.Metadata.Types
+    ( Description (..)
+    , Logo (..)
+    , Name (..)
+    , Subject (..)
+    , WellKnown (..)
+    , WellKnownProperty (..)
+    , parseWellKnown'
+    )
 import Data.Tagged
+    ( Tagged (..) )
+import Test.Tasty.QuickCheck hiding
+    ( Property )
+
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Text as Aeson
+import qualified Data.Aeson.Types as Aeson
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Test.Tasty.QuickCheck hiding (Property)
-
-import Cardano.Metadata.Types
+import qualified Text.Hex as T
 
 genSubject :: Gen Subject
 genSubject = Subject . T.pack . getPrintableString <$> arbitrary
@@ -25,13 +37,22 @@ genHashSubject = do
   let hashed = hashWith @h T.encodeUtf8 preimage
   pure $ (,) preimage $ Tagged @h $ Subject $ T.encodeHex $ hashToBytes hashed
 
-genTextValue :: Gen A.Value
-genTextValue = A.String . toStrict . A.encodeToLazyText . A.String . T.pack . getPrintableString <$> arbitrary
+genTextValue :: Gen Aeson.Value
+genTextValue =
+    printableStringToJson <$> arbitrary
+  where
+    printableStringToJson
+        = Aeson.String
+        . toStrict
+        . Aeson.encodeToLazyText
+        . Aeson.String
+        . T.pack
+        . getPrintableString
 
 genWellKnownText :: WellKnownProperty p => Gen (WellKnown p)
-genWellKnownText = suchThatMap genTextValue $ \s -> case A.parse parseWellKnown' s of
-  A.Error _ -> Nothing
-  A.Success x -> Just x
+genWellKnownText = suchThatMap genTextValue $ \s -> case Aeson.parse parseWellKnown' s of
+  Aeson.Error _ -> Nothing
+  Aeson.Success x -> Just x
 
 genName :: Gen (WellKnown Name)
 genName = genWellKnownText

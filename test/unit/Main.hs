@@ -1,7 +1,4 @@
-import Cardano.Prelude
--- import Test.Tasty
-
--- import qualified Test.Cardano.Metadata.Types
+import Prelude
 
 main :: IO ()
 main = pure ()
