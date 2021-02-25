@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
@@ -39,6 +40,14 @@ module Cardano.Metadata.Types
 
 import Cardano.Prelude
 
+import Cardano.Api
+    ( AsType (AsMaryEra, AsScriptInEra)
+    , MaryEra
+    , ScriptHash
+    , ScriptInEra (..)
+    , deserialiseFromCBOR
+    , hashScript
+    )
 import Cardano.Crypto.DSIGN
     ( Ed25519DSIGN
     , SigDSIGN
@@ -49,7 +58,7 @@ import Cardano.Crypto.DSIGN
     , verifyDSIGN
     )
 import Cardano.Crypto.Hash
-    ( Blake2b_224, Blake2b_256, Hash, castHash, hashToBytes, hashWith )
+    ( Blake2b_256, Hash, castHash, hashToBytes, hashWith )
 import Control.Category
     ( id )
 import Control.Monad.Fail
@@ -64,6 +73,7 @@ import Network.URI
 import qualified AesonHelpers
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
@@ -75,11 +85,14 @@ newtype Subject = Subject { unSubject :: Text }
 hashSubject :: Subject -> Hash Blake2b_256 Subject
 hashSubject = hashWith (T.encodeUtf8 . unSubject)
 
-newtype Policy = Policy { unPolicy :: Text }
-    deriving Show
+data Policy = Policy
+    { rawPolicy :: Text
+    , getPolicy :: ScriptInEra MaryEra
+    } deriving Show
 
-hashPolicy :: Policy -> Hash Blake2b_224 Policy
-hashPolicy = hashWith (T.encodeUtf8 . unPolicy)
+hashPolicy :: Policy -> ScriptHash
+hashPolicy (Policy _ (ScriptInEra _ script)) =
+    hashScript script
 
 instance WellKnownProperty Policy where
     wellKnownPropertyName _ = Property "policy"
@@ -311,13 +324,22 @@ validateMaxLength n text
   where
     len = T.length text
 
+
+validateBase16 :: MonadFail f => Text -> f ByteString
+validateBase16 =
+    either fail pure . B16.decode . T.encodeUtf8
+
 validateMetadataName :: MonadFail f => Text -> f Name
 validateMetadataName = fmap Name .
     (validateMinLength 1 >=> validateMaxLength 50)
 
+validateScriptInEra :: MonadFail f => ByteString -> f (ScriptInEra MaryEra)
+validateScriptInEra =
+    either (fail . show) pure . deserialiseFromCBOR (AsScriptInEra AsMaryEra)
+
 validateMetadataPolicy :: MonadFail f => Text -> f Policy
-validateMetadataPolicy = fmap Policy .
-    (validateMinLength 56 >=> validateMaxLength 120)
+validateMetadataPolicy t = Policy t <$>
+    (validateBase16 >=> validateScriptInEra) t
 
 validateMetadataTicker :: MonadFail f => Text -> f Ticker
 validateMetadataTicker = fmap Ticker .

@@ -130,7 +130,9 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
     -- FIXME: Have proper parser for subject and policy. We expect both to be
     -- hex-encoded strings.
     subject <- o .:? "subject"
-    policy  <- o .:? "policy"
+
+    policyRaw <- o .:? unProperty (wellKnownPropertyName $ Proxy @Policy)
+    policy <- fmap _wellKnown_structured <$> mapM parseWellKnownGoguen policyRaw
 
     nameField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Name)
     descField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Description)
@@ -148,7 +150,7 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
 
     pure $ GoguenRegistryEntry
         { _goguenRegistryEntry_subject = Subject <$> subject
-        , _goguenRegistryEntry_policy  = Policy <$> policy
+        , _goguenRegistryEntry_policy  = policy
         , _goguenRegistryEntry_name = nameAnn
         , _goguenRegistryEntry_description = descAnn
         , _goguenRegistryEntry_logo = logoAnn
@@ -276,7 +278,7 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
     [ flip fmap (_goguenRegistryEntry_subject entry) $ \subject -> objField "subject" $
         PP.dquotes $ PP.pretty $ unSubject subject
     , flip fmap (_goguenRegistryEntry_policy entry) $ \policy -> objField "policy" $
-        PP.dquotes $ PP.pretty $ unPolicy policy
+        PP.dquotes $ PP.pretty $ rawPolicy policy
     , flip fmap (_goguenRegistryEntry_name entry) $ \name -> objField "name" $
         attested prettyWellKnown name
     , flip fmap (_goguenRegistryEntry_description entry) $ \description -> objField "description" $

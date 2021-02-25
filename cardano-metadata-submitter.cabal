@@ -21,19 +21,17 @@ library
   other-modules: AesonHelpers
   build-depends: base ^>=4.12.0.0
                , aeson
+               , base16-bytestring
                , base64-bytestring
                , bytestring
-               , containers
                , hex-text
                , prettyprinter
-               , some
-               , tagged
-               , tasty-quickcheck
                , text
                , unordered-containers
+               , network-uri
                , cardano-prelude
                , cardano-crypto-class
-               , network-uri
+               , cardano-api
   hs-source-dirs: src
   default-language: Haskell2010
   default-extensions: NoImplicitPrelude
@@ -51,50 +49,14 @@ executable cardano-metadata-submitter
                      , cardano-binary
                      , cardano-prelude
                      , cardano-metadata-submitter
-                     , containers
                      , directory
                      , JuicyPixels
-                     , hex-text
                      , optparse-applicative
                      , text
-                     , unordered-containers
+                     , cardano-api
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions: NoImplicitPrelude
                       OverloadedStrings
   if (!flag(development))
     ghc-options: -Werror -Wall
-
-test-suite unit
-  default-language: Haskell2010
-  default-extensions: NoImplicitPrelude
-                      OverloadedStrings
-  ghc-options:
-      -threaded -rtsopts
-      -Wall
-      -O2
-  build-depends: base
-  type: exitcode-stdio-1.0
-  extra-source-files: test/examples/*
-  hs-source-dirs: test/unit
-  main-is: Main.hs
-  if (!flag(development))
-    ghc-options: -Werror
-
-benchmark cardano-metadata-submitter-bench
-  default-language: Haskell2010
-  default-extensions: NoImplicitPrelude
-                      OverloadedStrings
-  ghc-options:
-      -threaded -rtsopts
-      -Wall
-      -O2
-  build-depends: base
-               , cardano-prelude
-               , criterion
-               , cardano-metadata-submitter
-  type: exitcode-stdio-1.0
-  hs-source-dirs: bench
-  main-is: Main.hs
-  if (!flag(development))
-    ghc-options: -Werror

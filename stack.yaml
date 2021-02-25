@@ -9,10 +9,8 @@ extra-deps:
   - some-1.0.1
 
 flags:
-  # Bring in less dependencies from iohk-monitoring
-  # See also: package options in nix/default.nix
-  iohk-monitoring:
-    disable-observables: true
+  cardano-crypto-praos:
+    external-libsodium-vrf: false
 
 nix:
   shell-file: nix/stack-shell.nix

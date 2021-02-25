@@ -3,6 +3,8 @@
 
 import Cardano.Prelude
 
+import Cardano.Api
+    ( serialiseToRawBytesHex )
 import Cardano.Binary
     ( decodeFullDecoder )
 import Cardano.Crypto.DSIGN
@@ -22,6 +24,7 @@ import Cardano.Metadata.Types
     , WellKnown (..)
     , WellKnownProperty (..)
     , emptyAttested
+    , hashPolicy
     , hashesForAttestation
     , makeAttestationSignature
     , propertyValueFromString
@@ -43,8 +46,9 @@ import System.Environment
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base64 as B64
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Char8 as B8
+import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
 
@@ -119,7 +123,7 @@ wellKnownOption strTransform =
         WellKnown pv <$> Aeson.parseEither parseWellKnown pv
 
 withQuotes :: String -> String
-withQuotes s = B8.unpack $ Aeson.encode $ Aeson.String $ T.pack s
+withQuotes s = BL8.unpack $ Aeson.encode $ Aeson.String $ T.pack s
 
 entryUpdateArgumentParser :: Maybe Subject -> OA.Parser EntryUpdateArguments
 entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
@@ -260,12 +264,21 @@ verifyEverything
     -> Either String ()
 verifyEverything record = do
     -- these fields are mandatory
-    subj <- verifyField _goguenRegistryEntry_subject
-    name <- verifyField _goguenRegistryEntry_name
-    desc <- verifyField _goguenRegistryEntry_description
+    subject <- verifyField _goguenRegistryEntry_subject
+    policy  <- verifyField _goguenRegistryEntry_policy
+    name    <- verifyField _goguenRegistryEntry_name
+    desc    <- verifyField _goguenRegistryEntry_description
+
+    -- 1. Policy should re-hash to first bytes of the subject
+    let policyId = T.pack . B8.unpack . serialiseToRawBytesHex . hashPolicy $ policy
+    unless (policyId `T.isPrefixOf` unSubject subject) $ Left $ T.unpack $ unlines
+        [ "The policy should re-hash to the first 28 bytes of the subject."
+        , "Expected: " <> T.take 56 (unSubject subject)
+        , "Got: " <> policyId
+        ]
 
     let verifyLocalAttestations fieldName field = do
-            let hashes = extractAttestationHashes subj field
+            let hashes = extractAttestationHashes subject field
             let (Attested attestations _) = field
             left (const $ fieldName <> " attestation verification failed") $
                 verifyAttested $ Attested attestations hashes
@@ -284,6 +297,7 @@ verifyEverything record = do
 
     missingFields = concat
         [ missingField "Missing field subject" _goguenRegistryEntry_subject
+        , missingField "Missing field policy: Use -p to speciy" _goguenRegistryEntry_policy
         , missingField "Missing field name: Use -n to specify" _goguenRegistryEntry_name
         , missingField "Missing field description: Use -d to specify" _goguenRegistryEntry_description
         ]
@@ -319,7 +333,7 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             logoData <- BL.readFile fname
             let strictLogoData = BL.toStrict logoData
             let logoB64 = B64.encode strictLogoData
-            let logoB64JSONText = T.pack $ withQuotes $ B8.unpack $ BL.fromStrict logoB64
+            let logoB64JSONText = T.pack $ withQuotes $ BL8.unpack $ BL.fromStrict logoB64
             dieOnLeft "Verifying PNG" $ void $ decodePng strictLogoData -- verify validity, don't actually use decoding
             fmap Just $ dieOnLeft "Loading image data" $ do
                 pv :: PropertyValue <- left T.unpack $ propertyValueFromString logoB64JSONText
