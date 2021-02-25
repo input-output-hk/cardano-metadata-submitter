@@ -39,7 +39,7 @@ import Control.Arrow
 import Data.List
     ( isSuffixOf )
 import Data.Time
-    ( UTCTime, diffUTCTime, getCurrentTime )
+    ( NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime )
 import Prelude
     ( String )
 import System.Directory
@@ -348,7 +348,9 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
         Just k -> attestFields k attestProps newRecord
         Nothing -> pure newRecord
 
-    slot <- getCurrentSlot defaultShelleyStartTime
+    -- FIXME: Allow users to specify a different start time and/or slot
+    -- NOTE: Only useful for validating scripts which contains timelocks.
+    slot <- getCurrentSlot mainnetShelleyStartTime mainnetShelleyStartSlot mainnetShelleySlotLength
 
     let finalVerificationStatus = verifyEverything slot newRecordWithAttestations
     let outputString = show (serializeRegistryEntry newRecordWithAttestations) <> "\n"
@@ -392,14 +394,21 @@ argumentParser defaultSubject = asum
     [ ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject
     ]
 
-getCurrentSlot :: UTCTime -> IO SlotNo
-getCurrentSlot startTime = do
+getCurrentSlot :: UTCTime -> SlotNo -> NominalDiffTime -> IO SlotNo
+getCurrentSlot startTime (SlotNo startSlot) slotLength = do
     now <- getCurrentTime
     let delta = nominalDiffTimeToSeconds $ now `diffUTCTime` startTime
-    pure $ SlotNo $ fromIntegral $ delta `div` slotLength
+    let slotsSinceShelley = fromIntegral $ delta `div` round slotLength
+    pure $ SlotNo $ slotsSinceShelley + startSlot
   where
-    slotLength = 1
-    nominalDiffTimeToSeconds = (`div` 1000000000000) . fromEnum
+    nominalDiffTimeToSeconds :: NominalDiffTime -> Integer
+    nominalDiffTimeToSeconds = round
 
-defaultShelleyStartTime :: UTCTime
-defaultShelleyStartTime = Prelude.read "2020-07-29 21:44:51 UTC"
+mainnetShelleyStartTime :: UTCTime
+mainnetShelleyStartTime = Prelude.read "2020-07-29 21:44:51 UTC"
+
+mainnetShelleyStartSlot :: SlotNo
+mainnetShelleyStartSlot = SlotNo 4492800
+
+mainnetShelleySlotLength :: NominalDiffTime
+mainnetShelleySlotLength = 1
