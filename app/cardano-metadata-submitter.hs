@@ -115,7 +115,7 @@ data Arguments
 
 wellKnownOption
   :: forall p. WellKnownProperty p
-  => (String -> String)
+  => (String -> Text)
   -> OA.Mod OA.OptionFields (WellKnown p)
   -> OA.Parser (WellKnown p)
 wellKnownOption strTransform =
@@ -123,11 +123,11 @@ wellKnownOption strTransform =
   where
     wellKnownReader :: OA.ReadM (WellKnown p)
     wellKnownReader = OA.eitherReader $ \str -> do
-        pv :: PropertyValue <- left T.unpack $ propertyValueFromString $ T.pack $ strTransform str
+        pv :: PropertyValue <- left T.unpack $ propertyValueFromString $ strTransform str
         WellKnown pv <$> Aeson.parseEither parseWellKnown pv
 
-withQuotes :: String -> String
-withQuotes s = BL8.unpack $ Aeson.encode $ Aeson.String $ T.pack s
+withQuotes :: String -> Text
+withQuotes s = "\"" <> T.pack s <> "\""
 
 entryUpdateArgumentParser :: Maybe Subject -> OA.Parser EntryUpdateArguments
 entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
@@ -335,7 +335,7 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             logoData <- BL.readFile fname
             let strictLogoData = BL.toStrict logoData
             let logoB64 = B64.encode strictLogoData
-            let logoB64JSONText = T.pack $ withQuotes $ BL8.unpack $ BL.fromStrict logoB64
+            let logoB64JSONText = withQuotes $ BL8.unpack $ BL.fromStrict logoB64
             fmap Just $ dieOnLeft "Loading image data" $ do
                 pv :: PropertyValue <- left T.unpack $ propertyValueFromString logoB64JSONText
                 emptyAttested . WellKnown pv <$> Aeson.parseEither parseWellKnown pv
