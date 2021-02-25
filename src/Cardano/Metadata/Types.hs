@@ -81,6 +81,11 @@ newtype Policy = Policy { unPolicy :: Text }
 hashPolicy :: Policy -> Hash Blake2b_224 Policy
 hashPolicy = hashWith (T.encodeUtf8 . unPolicy)
 
+instance WellKnownProperty Policy where
+    wellKnownPropertyName _ = Property "policy"
+    parseWellKnown = Aeson.withText "policy"
+        validateMetadataPolicy . propertyValueToJson
+
 newtype Property = Property { unProperty :: Text }
     deriving (Show, Eq, Ord)
 
@@ -307,8 +312,12 @@ validateMaxLength n text
     len = T.length text
 
 validateMetadataName :: MonadFail f => Text -> f Name
-validateMetadataName =  fmap Name .
+validateMetadataName = fmap Name .
     (validateMinLength 1 >=> validateMaxLength 50)
+
+validateMetadataPolicy :: MonadFail f => Text -> f Policy
+validateMetadataPolicy = fmap Policy .
+    (validateMinLength 56 >=> validateMaxLength 120)
 
 validateMetadataTicker :: MonadFail f => Text -> f Ticker
 validateMetadataTicker = fmap Ticker .

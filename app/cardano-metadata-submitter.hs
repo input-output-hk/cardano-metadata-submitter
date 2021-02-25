@@ -169,8 +169,9 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
     logoFilenameParser = optional $ OA.strOption (OA.long "logo" <> OA.short 'l' <> OA.metavar "LOGO.png")
 
     goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
-    goguenRegistryEntryParser = GoguenRegistryEntry Nothing Nothing
-        <$> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
+    goguenRegistryEntryParser = GoguenRegistryEntry Nothing
+        <$> optional (_wellKnown_structured <$> wellKnownOption withQuotes (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
+        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
         <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
         <*> pure Nothing
         <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
