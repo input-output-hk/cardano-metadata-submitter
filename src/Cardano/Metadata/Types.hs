@@ -36,6 +36,7 @@ module Cardano.Metadata.Types
     , Url(..)
     , Ticker(..)
     , Unit(..)
+    , parseUnit
     ) where
 
 import Cardano.Prelude
@@ -67,6 +68,8 @@ import Data.Aeson
     ( (.:) )
 import Data.Text
     ( Text )
+import Data.Text.Read
+    ( decimal )
 import Network.URI
     ( URI (..), parseAbsoluteURI )
 
@@ -288,13 +291,24 @@ data Unit = Unit
 instance WellKnownProperty Unit where
     wellKnownPropertyName _ = Property "unit"
     parseWellKnown =
-        Aeson.withObject "unit" parser . propertyValueToJson
-      where
-        parser o = do
-            name <- Aeson.prependFailure "unit" (o .: "name")
-            decimals <- Aeson.prependFailure "unit" (o .: "decimals")
-            AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
-            validateMetadataUnit name decimals
+        parseUnit . propertyValueToJson
+
+parseUnit
+    :: Aeson.Value
+    -> Aeson.Parser Unit
+parseUnit v =
+    parseAsText v <|> parseAsObject v
+  where
+    parseAsText = Aeson.withText "unit" $ \t -> case decimal t of
+        Left e -> fail e
+        Right (decimals, name) ->
+            validateMetadataUnit (T.drop 1 name) decimals
+
+    parseAsObject = Aeson.withObject "unit" $ \o -> do
+        name <- Aeson.prependFailure "unit" (o .: "name")
+        decimals <- Aeson.prependFailure "unit" (o .: "decimals")
+        AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
+        validateMetadataUnit name decimals
 
 newtype Ticker = Ticker
     { unTicker :: Text
@@ -304,7 +318,6 @@ instance WellKnownProperty Ticker where
     wellKnownPropertyName _ = Property "ticker"
     parseWellKnown = Aeson.withText "ticker"
         validateMetadataTicker . propertyValueToJson
-
 
 --
 -- Validators

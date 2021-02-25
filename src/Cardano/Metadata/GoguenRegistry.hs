@@ -27,6 +27,7 @@ import Cardano.Metadata.Types
     , Name (..)
     , Policy (..)
     , Property (..)
+    , PropertyValue (..)
     , Subject (..)
     , Ticker (..)
     , Unit (..)
@@ -34,9 +35,11 @@ import Cardano.Metadata.Types
     , WellKnown (..)
     , WellKnownProperty (..)
     , hashesForAttestation
+    , parseUnit
     , propertyValueFromString
     , propertyValueToString
     , verifyAttested
+    , verifyPolicy
     , withWellKnown
     )
 import Control.Monad.Fail
@@ -145,7 +148,7 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
     descAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) descField
     logoAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) logoField
     urlAnn    <- mapM (parseWithAttestation parseWellKnownGoguen) urlField
-    unitAnn   <- mapM (parseWithAttestation parseWellKnownGoguen) unitField
+    unitAnn   <- mapM (parseWithAttestation parseWellKnownUnit) unitField
     tickerAnn <- mapM (parseWithAttestation parseWellKnownGoguen) tickerField
 
     pure $ GoguenRegistryEntry
@@ -173,6 +176,22 @@ parseWellKnownGoguen =
                 Right v -> WellKnown v <$> parseWellKnown v
     in
         Aeson.withText "property value" parse
+
+parseWellKnownUnit
+    :: Aeson.Value
+    -> Aeson.Parser (WellKnown Unit)
+parseWellKnownUnit v =
+    parseUnit v <&> \u ->
+        let
+            rawUnit = mconcat
+                [ "\""
+                , show (unitDecimals u)
+                , ","
+                , show (unitName u)
+                , "\""
+                ]
+        in
+            WellKnown (PropertyValue rawUnit v) u
 
 parseWithAttestation
     :: (Aeson.Value -> Aeson.Parser a)
@@ -288,13 +307,17 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
     , flip fmap (_goguenRegistryEntry_url entry) $ \url -> objField "url" $
         attested prettyWellKnown url
     , flip fmap (_goguenRegistryEntry_unit entry) $ \unit_ -> objField "unit" $
-        attested prettyWellKnown unit_
+        attested prettyUnit unit_
     , flip fmap (_goguenRegistryEntry_ticker entry) $ \ticker -> objField "ticker" $
         attested prettyWellKnown ticker
     ]
  where
     prettyBytes = PP.dquotes . PP.pretty . T.encodeHex
     prettyWellKnown = PP.pretty . propertyValueToString . _wellKnown_raw
+    prettyUnit (WellKnown _ u) = encloseObj
+        [ objField "name" (PP.dquotes $ PP.pretty $ unitName u)
+        , objField "decimals" (PP.pretty $ unitDecimals u)
+        ]
     encloseObj fs = PP.vcat
         [ PP.nest 4 $ PP.vcat $ PP.lbrace : PP.punctuate PP.comma fs
         , PP.rbrace
