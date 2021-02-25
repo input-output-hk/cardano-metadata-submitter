@@ -9,6 +9,8 @@ module Cardano.Metadata.GoguenRegistry where
 
 import Cardano.Prelude
 
+import Cardano.Api
+    ( serialiseToRawBytesHex )
 import Cardano.Crypto.DSIGN.Class
     ( DSIGNAlgorithm
     , SigDSIGN
@@ -34,12 +36,12 @@ import Cardano.Metadata.Types
     , Url (..)
     , WellKnown (..)
     , WellKnownProperty (..)
+    , hashPolicy
     , hashesForAttestation
     , parseUnit
     , propertyValueFromString
     , propertyValueToString
     , verifyAttested
-    , verifyPolicy
     , withWellKnown
     )
 import Control.Monad.Fail
@@ -47,11 +49,12 @@ import Control.Monad.Fail
 import Data.Aeson
     ( (.:), (.:?) )
 import Prelude
-    ( error )
+    ( String )
 
 import qualified AesonHelpers
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
 import qualified Prettyprinter as PP
 import qualified Text.Hex as T
@@ -223,60 +226,17 @@ parseAnnotatedSignature f o = do
     AesonHelpers.noOtherFields "annotated signature" o ["publicKey", "signature"]
     pure $ f publicKey signature
 
--- | The subject is made of the concatenation of the policy id and asset name. The
--- asset name is potentially empty. Therefore, the first 28 bytes of the subject
--- are the policy id.
 verifyPolicy
-    :: (Monoid s, IsString s)
-    => Subject
-    -> Policy
-    -> Either s ()
-verifyPolicy _subject _policy =
-    error "FIXME: verifyPolicy"
---    case T.decodeHex subjectHex of
---        Nothing ->
---            Left "Subject is not a byte string"
---        Just subject -> do
---            hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
---                Right (Some h) -> Right $ case h of
---                    (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
---                        hashToBytes . hashWith @h id
---                    (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
---                        hashToBytes . hashWith @h id
---                    (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
---                        hashToBytes . hashWith @h id
---                Left () -> Left $ mconcat
---                    [ "Hash function not supported. Supported functions: "
---                    , "sha256, blake2b-256, blake2b-224"
---                    ]
---            case T.decodeHex (_preimage_preimage preimage) of
---                Nothing ->
---                    Left "Preimage is not a byte string"
---                Just preimageBytes -> do
---                    if hasher preimageBytes == subject
---                    then pure ()
---                    else Left "Hashed preimage does not equal subject"
---
---hashPreimage
---  :: (Monoid s, IsString s)
---  => Preimage
---  -> Either s Subject
---hashPreimage preimage = do
---    hasher <- case fromHashFnIdentifier (_preimage_hashFn preimage) of
---        Right (Some h) -> Right $ case h of
---            (SupportedPreimageHash_Blake2b_256 :: SupportedPreimageHash h) ->
---                hashToBytes . hashWith @h id
---            (SupportedPreimageHash_Blake2b_224 :: SupportedPreimageHash h) ->
---                hashToBytes . hashWith @h id
---            (SupportedPreimageHash_SHA256 :: SupportedPreimageHash h) ->
---                hashToBytes . hashWith @h id
---        Left () -> Left $ mconcat
---            [ "Hash function not supported. Supported functions: "
---            , "sha256, blake2b-256, blake2b-224"
---            ]
---    case T.decodeHex (_preimage_preimage preimage) of
---        Nothing -> Left "Preimage is not a byte string"
---        Just preimageBytes -> pure $ Subject $ T.encodeHex $ hasher preimageBytes
+    :: Policy
+    -> Subject
+    -> Either String ()
+verifyPolicy policy (Subject subject) = do
+    let policyId = T.pack . B8.unpack . serialiseToRawBytesHex . hashPolicy $ policy
+    unless (policyId `T.isPrefixOf` subject) $ Left $ T.unpack $ unlines
+        [ "The policy should re-hash to the first 28 bytes of the subject."
+        , "Expected: " <> T.take 56 subject
+        , "Got: " <> policyId
+        ]
 
 verifyAttestations
     :: CompleteGoguenRegistryEntry
@@ -333,7 +293,7 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
     attested prettyValue a = encloseObj
         [ objField "value" (prettyValue (_attested_property a))
         , objField "anSignatures" $ encloseList $
-            fmap attestation $ _attested_signatures a
+            attestation <$> _attested_signatures a
         ]
     attestation s = encloseObj
         [ objField "publicKey" $ prettyBytes $ rawSerialiseVerKeyDSIGN $

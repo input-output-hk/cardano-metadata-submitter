@@ -1,37 +1,36 @@
 {-# LANGUAGE ApplicativeDo #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Cardano.Prelude
 
 import Cardano.Api
-    ( serialiseToRawBytesHex )
-import Cardano.Binary
-    ( decodeFullDecoder )
-import Cardano.Crypto.DSIGN
-    ( Ed25519DSIGN, SignKeyDSIGN, decodeSignKeyDSIGN )
+    ( AsType (AsPaymentExtendedKey, AsPaymentKey) )
+import Cardano.CLI.Shelley.Key
+    ( readSigningKeyFile )
+import Cardano.CLI.Types
+    ( SigningKeyFile (..) )
 import Cardano.Metadata.GoguenRegistry
     ( GoguenRegistryEntry (..)
     , PartialGoguenRegistryEntry
     , parseRegistryEntry
     , serializeRegistryEntry
+    , verifyPolicy
     )
 import Cardano.Metadata.Types
     ( Attested (..)
     , HashesForAttestation (..)
-    , Logo (..)
+    , MakeAttestationSignature (..)
     , PropertyValue (..)
+    , SomeSigningKey (..)
     , Subject (..)
     , WellKnown (..)
     , WellKnownProperty (..)
     , emptyAttested
-    , hashPolicy
     , hashesForAttestation
-    , makeAttestationSignature
     , propertyValueFromString
     , verifyAttested
     )
-import Codec.Picture.Png
-    ( decodePng )
 import Control.Arrow
     ( left )
 import Data.List
@@ -46,7 +45,6 @@ import System.Environment
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
@@ -213,11 +211,11 @@ combineRegistryEntries new old = GoguenRegistryEntry
     raw (WellKnown (PropertyValue r _) _) = r
 
 attestFields
-    :: SignKeyDSIGN Ed25519DSIGN
+    :: SomeSigningKey
     -> [AttestationField]
     -> PartialGoguenRegistryEntry
     -> Either String PartialGoguenRegistryEntry
-attestFields key props old = do
+attestFields (SomeSigningKey someSigningKey) props old = do
     subj <- case _goguenRegistryEntry_subject old of
         Just subj -> pure subj
         Nothing -> Left "Cannot attest without a subject record"
@@ -248,7 +246,7 @@ attestFields key props old = do
         else Attested att wk
       where
         wkHash = extractAttestationHashes subj orig
-        newAttestationSig = makeAttestationSignature key wkHash
+        newAttestationSig = makeAttestationSignature someSigningKey wkHash
         attestations = newAttestationSig:att
 
 extractAttestationHashes
@@ -263,20 +261,16 @@ verifyEverything
     :: PartialGoguenRegistryEntry
     -> Either String ()
 verifyEverything record = do
-    -- these fields are mandatory
+    -- 1. Verify that mandatory fields are present
     subject <- verifyField _goguenRegistryEntry_subject
     policy  <- verifyField _goguenRegistryEntry_policy
     name    <- verifyField _goguenRegistryEntry_name
     desc    <- verifyField _goguenRegistryEntry_description
 
-    -- 1. Policy should re-hash to first bytes of the subject
-    let policyId = T.pack . B8.unpack . serialiseToRawBytesHex . hashPolicy $ policy
-    unless (policyId `T.isPrefixOf` unSubject subject) $ Left $ T.unpack $ unlines
-        [ "The policy should re-hash to the first 28 bytes of the subject."
-        , "Expected: " <> T.take 56 (unSubject subject)
-        , "Got: " <> policyId
-        ]
+    -- 2. Policy should re-hash to first bytes of the subject
+    verifyPolicy policy subject
 
+    -- 3. Verify that all attestations have matching signatures
     let verifyLocalAttestations fieldName field = do
             let hashes = extractAttestationHashes subject field
             let (Attested attestations _) = field
@@ -286,11 +280,10 @@ verifyEverything record = do
     verifyLocalAttestations "Name" name
     verifyLocalAttestations "Description" desc
 
-    forM_ (_goguenRegistryEntry_logo record) $ \logo -> do
-        verifyLocalAttestations "Logo" logo
-        -- FIXME: Move to parser
-        let (Attested _ (WellKnown _ (Logo logoData))) = logo
-        void $ left ("Verifying PNG: " <>) $ decodePng $ BL.toStrict logoData
+    forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "Logo"
+    forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "Url"
+    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "Unit"
+    forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "Ticker"
   where
     verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
     verifyField field = maybe (Left missingFields) Right (field record)
@@ -334,7 +327,6 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             let strictLogoData = BL.toStrict logoData
             let logoB64 = B64.encode strictLogoData
             let logoB64JSONText = T.pack $ withQuotes $ BL8.unpack $ BL.fromStrict logoB64
-            dieOnLeft "Verifying PNG" $ void $ decodePng strictLogoData -- verify validity, don't actually use decoding
             fmap Just $ dieOnLeft "Loading image data" $ do
                 pv :: PropertyValue <- left T.unpack $ propertyValueFromString logoB64JSONText
                 emptyAttested . WellKnown pv <$> Aeson.parseEither parseWellKnown pv
@@ -366,11 +358,18 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
         Left err  -> die $ T.pack $ lbl <> ": " <> err
         Right val -> pure val
 
-    readKeyFile :: FilePath -> IO (SignKeyDSIGN Ed25519DSIGN)
+    readKeyFile :: FilePath -> IO SomeSigningKey
     readKeyFile skFname = do
-        lbs <- BL.readFile skFname
-        dieOnLeft "Error reading key file" $ left show $
-            decodeFullDecoder "Signing Key" decodeSignKeyDSIGN lbs
+        asNormalKey   <- fmap SomeSigningKey <$>
+            readSigningKeyFile AsPaymentKey (SigningKeyFile skFname)
+        asExtendedKey <- fmap SomeSigningKey <$>
+            readSigningKeyFile AsPaymentExtendedKey (SigningKeyFile skFname)
+
+        dieOnLeft "Error reading key file" $
+            left show $ asNormalKey `orElse_` asExtendedKey
+
+      where
+        orElse_ a b = either (const b) Right a
 
     parseJSON :: Either String Aeson.Value -> IO (PartialGoguenRegistryEntry)
     parseJSON registryJSON = dieOnLeft "Parse error" $ do

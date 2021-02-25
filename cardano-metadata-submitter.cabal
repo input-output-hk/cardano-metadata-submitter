@@ -32,6 +32,8 @@ library
                , cardano-prelude
                , cardano-crypto-class
                , cardano-api
+               , cardano-crypto
+               , JuicyPixels
   hs-source-dirs: src
   default-language: Haskell2010
   default-extensions: NoImplicitPrelude
@@ -50,10 +52,11 @@ executable cardano-metadata-submitter
                      , cardano-prelude
                      , cardano-metadata-submitter
                      , directory
-                     , JuicyPixels
                      , optparse-applicative
                      , text
                      , cardano-api
+                     , cardano-cli
+                     , cardano-crypto
   hs-source-dirs:      app
   default-language:    Haskell2010
   default-extensions: NoImplicitPrelude

@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -18,7 +19,8 @@ module Cardano.Metadata.Types
     , propertyValueToJson
     , hashPropertyValue
     , AttestationSignature (..)
-    , makeAttestationSignature
+    , MakeAttestationSignature(..)
+    , SomeSigningKey (..)
     , HashesForAttestation (..)
     , hashesForAttestation
     , attestationDigest
@@ -44,28 +46,38 @@ import Cardano.Prelude
 import Cardano.Api
     ( AsType (AsMaryEra, AsScriptInEra)
     , MaryEra
+    , PaymentExtendedKey
+    , PaymentKey
     , ScriptHash
     , ScriptInEra (..)
+    , SigningKey
     , deserialiseFromCBOR
     , hashScript
+    , serialiseToRawBytes
     )
 import Cardano.Crypto.DSIGN
     ( Ed25519DSIGN
     , SigDSIGN
-    , SignKeyDSIGN
     , VerKeyDSIGN
     , deriveVerKeyDSIGN
+    , rawDeserialiseSigDSIGN
+    , rawDeserialiseSignKeyDSIGN
+    , rawDeserialiseVerKeyDSIGN
     , signDSIGN
     , verifyDSIGN
     )
 import Cardano.Crypto.Hash
     ( Blake2b_256, Hash, castHash, hashToBytes, hashWith )
+import Codec.Picture.Png
+    ( decodePng )
 import Control.Category
     ( id )
 import Control.Monad.Fail
     ( fail )
 import Data.Aeson
     ( (.:) )
+import Data.Maybe
+    ( fromJust )
 import Data.Text
     ( Text )
 import Data.Text.Read
@@ -74,6 +86,7 @@ import Network.URI
     ( URI (..), parseAbsoluteURI )
 
 import qualified AesonHelpers
+import qualified Cardano.Crypto.Wallet as CC
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base16 as B16
@@ -139,16 +152,47 @@ data AttestationSignature = AttestationSignature
     , _attestationSignature_signature :: SigDSIGN Ed25519DSIGN
     } deriving Show
 
-makeAttestationSignature
-    :: SignKeyDSIGN Ed25519DSIGN
-    -> HashesForAttestation
-    -> AttestationSignature
-makeAttestationSignature signingKey hashes = AttestationSignature
-    { _attestationSignature_publicKey = deriveVerKeyDSIGN signingKey
-    , _attestationSignature_signature = signDSIGN ()
-        (hashToBytes $ attestationDigest hashes)
-        signingKey
-    }
+data SomeSigningKey where
+    SomeSigningKey
+        :: forall keyrole. (MakeAttestationSignature keyrole)
+        => SigningKey keyrole
+        -> SomeSigningKey
+
+class MakeAttestationSignature keyrole where
+    makeAttestationSignature
+        :: SigningKey keyrole
+        -> HashesForAttestation
+        -> AttestationSignature
+
+instance MakeAttestationSignature PaymentKey where
+    makeAttestationSignature key hashes =
+        AttestationSignature
+            { _attestationSignature_publicKey =
+                deriveVerKeyDSIGN prv
+            , _attestationSignature_signature = signDSIGN ()
+                (hashToBytes $ attestationDigest hashes)
+                prv
+            }
+      where
+        -- Very ugly cast of a 'PaymentKey' into a SignKeyDSign
+        Just prv = rawDeserialiseSignKeyDSIGN (serialiseToRawBytes key)
+
+instance MakeAttestationSignature PaymentExtendedKey where
+    makeAttestationSignature key hashes =
+        AttestationSignature
+            { _attestationSignature_publicKey = unsafeToVerKeyDSign
+                $ CC.toXPub xprv
+            , _attestationSignature_signature = unsafeToSigDSign
+                $ CC.sign (mempty :: ByteString) xprv (hashToBytes $ attestationDigest hashes)
+            }
+      where
+        -- Very ugly cast of a 'PaymentExtendedKey' into an 'XPrv'
+        Right xprv = CC.xprv (serialiseToRawBytes key)
+        -- NOTE: We can 'safely' cast to VerKeyDSIGN and SigDSIGN for
+        -- verification because the signature verification algorithm is the
+        -- same for extended and normal keys.
+        unsafeToVerKeyDSign = fromJust . rawDeserialiseVerKeyDSIGN . CC.xpubPublicKey
+        unsafeToSigDSign = fromJust . rawDeserialiseSigDSIGN . CC.unXSignature
 
 -- | Hashes required to produce a message for attestation purposes
 data HashesForAttestation = HashesForAttestation
@@ -369,7 +413,10 @@ validateMetadataUnit name decimals = Unit name decimals <$
 
 validateMetadataLogo :: MonadFail f => BL.ByteString -> f Logo
 validateMetadataLogo bytes
-    | len <= maxLen = pure (Logo bytes)
+    | len <= maxLen =
+        case decodePng (BL.toStrict bytes) of
+            Left e     -> fail $ "Verifying PNG: " <> e
+            Right _png -> pure (Logo bytes)
     | otherwise = fail $ "Length must be no more than " ++ show maxLen ++ " bytes, got " ++ show len
   where
     len = BL.length bytes
