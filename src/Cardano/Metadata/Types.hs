@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -11,6 +12,7 @@ module Cardano.Metadata.Types
     , hashSubject
     , Policy (..)
     , hashPolicy
+    , evaluatePolicy
     , Property (..)
     , hashProperty
     , PropertyValue (..)
@@ -48,9 +50,12 @@ import Cardano.Api
     , MaryEra
     , PaymentExtendedKey
     , PaymentKey
+    , Script (..)
     , ScriptHash
     , ScriptInEra (..)
     , SigningKey
+    , SimpleScript
+    , SimpleScriptVersion (..)
     , deserialiseFromCBOR
     , hashScript
     , serialiseToRawBytes
@@ -68,6 +73,12 @@ import Cardano.Crypto.DSIGN
     )
 import Cardano.Crypto.Hash
     ( Blake2b_256, Hash, castHash, hashToBytes, hashWith )
+import Cardano.Ledger.ShelleyMA.Timelocks
+    ( Timelock (RequireAllOf, RequireAnyOf, RequireMOf, RequireSignature, RequireTimeExpire, RequireTimeStart)
+    , ValidityInterval (..)
+    )
+import Cardano.Slotting.Slot
+    ( SlotNo (..) )
 import Codec.Picture.Png
     ( decodePng )
 import Control.Category
@@ -84,16 +95,26 @@ import Data.Text.Read
     ( decimal )
 import Network.URI
     ( URI (..), parseAbsoluteURI )
+import Ouroboros.Consensus.Shelley.Eras
+    ( StandardCrypto )
+import Shelley.Spec.Ledger.BaseTypes
+    ( StrictMaybe (SJust, SNothing) )
+import Shelley.Spec.Ledger.Keys
+    ( KeyHash (..), KeyRole (Witness) )
 
 import qualified AesonHelpers
+import qualified Cardano.Api as Api
 import qualified Cardano.Crypto.Wallet as CC
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Sequence.Strict as Seq
+import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Shelley.Spec.Ledger.Keys as Shelley
 
 newtype Subject = Subject { unSubject :: Text }
     deriving Show
@@ -256,6 +277,74 @@ verifyAttested attested =
         case invalids of
             [] -> Right ()
             _ -> Left invalids
+
+evaluatePolicy
+    :: Policy
+    -> SlotNo
+    -> [AttestationSignature]
+    -> Either Text ()
+evaluatePolicy (Policy _ script) atSlot sigs =
+    case script of
+        ScriptInEra _ (SimpleScript SimpleScriptV1 s) ->
+            evaluateAtSlot $ toAllegraTimelock s
+        ScriptInEra _ (SimpleScript SimpleScriptV2 s) ->
+            evaluateAtSlot $ toAllegraTimelock s
+        ScriptInEra _ (PlutusScript _ _) ->
+            panic "impossible"
+  where
+    evaluateAtSlot :: Timelock StandardCrypto -> Either Text ()
+    evaluateAtSlot s
+        | evalTimelock hashes (ValidityInterval (SJust atSlot) (SJust atSlot)) s =
+            Right ()
+        | otherwise =
+            Left "Unable to validate the monetary policy now and with current attestations."
+
+    hashes :: Set (KeyHash 'Witness StandardCrypto)
+    hashes = Set.fromList
+        $ Shelley.hashKey . Shelley.VKey . _attestationSignature_publicKey <$> sigs
+
+    -- | Conversion for the 'Timelock.Timelock' language that is shared between the
+    -- Allegra and Mary eras.
+    --
+    toAllegraTimelock :: forall lang. SimpleScript lang -> Timelock StandardCrypto
+    toAllegraTimelock = go
+      where
+        go :: SimpleScript lang -> Timelock StandardCrypto
+        go (Api.RequireSignature (Api.PaymentKeyHash kh)) = RequireSignature (Shelley.coerceKeyRole kh)
+        go (Api.RequireAllOf s) = RequireAllOf (Seq.fromList (map go s))
+        go (Api.RequireAnyOf s) = RequireAnyOf (Seq.fromList (map go s))
+        go (Api.RequireMOf m s) = RequireMOf m (Seq.fromList (map go s))
+        go (Api.RequireTimeBefore _ t) = RequireTimeExpire t
+        go (Api.RequireTimeAfter  _ t) = RequireTimeStart  t
+
+    evalTimelock
+        :: (crypto ~ StandardCrypto)
+        => Set (KeyHash 'Witness crypto)
+        -> ValidityInterval
+        -> Timelock crypto
+        -> Bool
+    evalTimelock _vhks (ValidityInterval start _) (RequireTimeStart lockStart) =
+        lockStart `lteNegInfty` start
+    evalTimelock _vhks (ValidityInterval _ end) (RequireTimeExpire lockExp) =
+        end `ltePosInfty` lockExp
+    evalTimelock vhks _vi (RequireSignature hash) =
+        Set.member hash vhks
+    evalTimelock vhks vi (RequireAllOf xs) =
+        all (evalTimelock vhks vi) xs
+    evalTimelock vhks vi (RequireAnyOf xs) =
+        any (evalTimelock vhks vi) xs
+    evalTimelock vhks vi (RequireMOf m xs) =
+        m <= sum (fmap (\x -> if evalTimelock vhks vi x then 1 else 0) xs)
+
+    -- | less-than-equal comparison, where Nothing is negative infinity
+    lteNegInfty :: SlotNo -> StrictMaybe SlotNo -> Bool
+    lteNegInfty _ SNothing = False -- i > -∞
+    lteNegInfty i (SJust j) = i <= j
+
+    -- | less-than-equal comparison, where Nothing is positive infinity
+    ltePosInfty :: StrictMaybe SlotNo -> SlotNo -> Bool
+    ltePosInfty SNothing _ = False -- ∞ > j
+    ltePosInfty (SJust i) j = i <= j
 
 -- TODO: Add a tag type that allows all well known properties to be enumerated
 class WellKnownProperty p where

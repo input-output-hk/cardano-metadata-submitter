@@ -27,14 +27,19 @@ import Cardano.Metadata.Types
     , WellKnown (..)
     , WellKnownProperty (..)
     , emptyAttested
+    , evaluatePolicy
     , hashesForAttestation
     , propertyValueFromString
     , verifyAttested
     )
+import Cardano.Slotting.Slot
+    ( SlotNo (..) )
 import Control.Arrow
     ( left )
 import Data.List
     ( isSuffixOf )
+import Data.Time
+    ( UTCTime, diffUTCTime, getCurrentTime )
 import Prelude
     ( String )
 import System.Directory
@@ -49,6 +54,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
+import qualified Prelude
 
 main :: IO ()
 main = do
@@ -258,9 +264,10 @@ extractAttestationHashes subj (Attested _ (WellKnown raw structured)) =
     hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw
 
 verifyEverything
-    :: PartialGoguenRegistryEntry
+    :: SlotNo
+    -> PartialGoguenRegistryEntry
     -> Either String ()
-verifyEverything record = do
+verifyEverything atSlot record = do
     -- 1. Verify that mandatory fields are present
     subject <- verifyField _goguenRegistryEntry_subject
     policy  <- verifyField _goguenRegistryEntry_policy
@@ -274,16 +281,18 @@ verifyEverything record = do
     let verifyLocalAttestations fieldName field = do
             let hashes = extractAttestationHashes subject field
             let (Attested attestations _) = field
-            left (const $ fieldName <> " attestation verification failed") $
+            left (const $ "attestation verification failed for: " <> fieldName) $ do
                 verifyAttested $ Attested attestations hashes
+            left (const $ "policy evaluation failed for: " <> fieldName) $ do
+                evaluatePolicy policy atSlot attestations
 
-    verifyLocalAttestations "Name" name
-    verifyLocalAttestations "Description" desc
+    verifyLocalAttestations "name" name
+    verifyLocalAttestations "description" desc
 
-    forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "Logo"
-    forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "Url"
-    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "Unit"
-    forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "Ticker"
+    forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "logo"
+    forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "url"
+    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "unit"
+    forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "ticker"
   where
     verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
     verifyField field = maybe (Left missingFields) Right (field record)
@@ -339,7 +348,9 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
         Just k -> attestFields k attestProps newRecord
         Nothing -> pure newRecord
 
-    let finalVerificationStatus = verifyEverything newRecordWithAttestations
+    slot <- getCurrentSlot defaultShelleyStartTime
+
+    let finalVerificationStatus = verifyEverything slot newRecordWithAttestations
     let outputString = show (serializeRegistryEntry newRecordWithAttestations) <> "\n"
 
     writeFile (draftFilename fInfo) outputString
@@ -380,3 +391,15 @@ argumentParser :: Maybe Subject -> OA.Parser Arguments
 argumentParser defaultSubject = asum
     [ ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject
     ]
+
+getCurrentSlot :: UTCTime -> IO SlotNo
+getCurrentSlot startTime = do
+    now <- getCurrentTime
+    let delta = nominalDiffTimeToSeconds $ now `diffUTCTime` startTime
+    pure $ SlotNo $ fromIntegral $ delta `div` slotLength
+  where
+    slotLength = 1
+    nominalDiffTimeToSeconds = (`div` 1000000000000) . fromEnum
+
+defaultShelleyStartTime :: UTCTime
+defaultShelleyStartTime = Prelude.read "2020-07-29 21:44:51 UTC"
