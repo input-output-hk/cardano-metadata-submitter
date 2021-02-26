@@ -102,8 +102,6 @@ import Data.Aeson
     ( FromJSON (..), ToJSON (..), (.:), (.=) )
 import Data.Maybe
     ( fromJust )
-import Data.Text
-    ( Text )
 import Data.Text.Read
     ( decimal )
 import Network.URI
@@ -220,8 +218,8 @@ evaluatePolicy (Policy _ script) atSlot sigs =
             evaluateAtSlot $ toAllegraTimelock s
         ScriptInEra _ (SimpleScript SimpleScriptV2 s) ->
             evaluateAtSlot $ toAllegraTimelock s
-        ScriptInEra _ (PlutusScript _ _) ->
-            panic "impossible"
+        -- ScriptInEra _ (PlutusScript _ _) ->
+        --     panic "impossible"
   where
     evaluateAtSlot :: Timelock StandardCrypto -> Either Text ()
     evaluateAtSlot s
