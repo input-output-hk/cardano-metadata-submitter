@@ -36,12 +36,6 @@ source-repository-package
   --sha256: 1p2kg2w02q5w1cvqzhfhqmxviy4xrzada3mmb096j2n6hfr20kri
 
 source-repository-package
-  type: git
-  location: https://github.com/input-output-hk/cardano-metadata-submitter
-  tag: 5592b9506660e7fb89f18ab006691f95523f9fad
-  --sha256: 15rcar3q52nhkkxj06wrj26kc2wkq91yp2caq882sswaaa4qhh2j
-
-source-repository-package
     type: git
     location: https://github.com/input-output-hk/cardano-node
     tag: e15515b785f7caae0ae5d997b26d9c4518062c71
