@@ -29,6 +29,7 @@ import Cardano.Metadata.Types
     , emptyAttested
     , evaluatePolicy
     , hashesForAttestation
+    , prettyPolicy
     , propertyValueFromString
     , verifyAttested
     )
@@ -222,7 +223,7 @@ attestFields
     :: SomeSigningKey
     -> [AttestationField]
     -> PartialGoguenRegistryEntry
-    -> Either String PartialGoguenRegistryEntry
+    -> Either Text PartialGoguenRegistryEntry
 attestFields (SomeSigningKey someSigningKey) props old = do
     subj <- case _goguenRegistryEntry_subject old of
         Just subj -> pure subj
@@ -268,7 +269,7 @@ extractAttestationHashes subj (Attested _ n (WellKnown raw structured)) =
 verifyEverything
     :: SlotNo
     -> PartialGoguenRegistryEntry
-    -> Either String ()
+    -> Either Text ()
 verifyEverything atSlot record = do
     -- 1. Verify that mandatory fields are present
     subject <- verifyField _goguenRegistryEntry_subject
@@ -285,7 +286,12 @@ verifyEverything atSlot record = do
             let (Attested attestations n _) = field
             left (const $ "attestation verification failed for: " <> fieldName) $ do
                 verifyAttested $ Attested attestations n hashes
-            left (const $ "policy evaluation failed for: " <> fieldName) $ do
+            let policyEvaluationFailed = unlines
+                    [ "policy evaluation failed for: " <> fieldName
+                    , "Policy is:"
+                    , prettyPolicy policy
+                    ]
+            left (const policyEvaluationFailed) $
                 evaluatePolicy policy atSlot attestations
 
     verifyLocalAttestations "name" name
@@ -296,18 +302,24 @@ verifyEverything atSlot record = do
     forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "unit"
     forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "ticker"
   where
-    verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either String a
+    verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either Text a
     verifyField field = maybe (Left missingFields) Right (field record)
 
-    missingFields = concat
-        [ missingField "Missing field subject" _goguenRegistryEntry_subject
-        , missingField "Missing field policy: Use -p to speciy" _goguenRegistryEntry_policy
-        , missingField "Missing field name: Use -n to specify" _goguenRegistryEntry_name
-        , missingField "Missing field description: Use -d to specify" _goguenRegistryEntry_description
+    missingFields :: Text
+    missingFields = mconcat
+        [ missingField "Missing field subject"
+            _goguenRegistryEntry_subject
+        , missingField "Missing field policy: Use -p to speciy"
+            _goguenRegistryEntry_policy
+        , missingField "Missing field name: Use -n to specify"
+            _goguenRegistryEntry_name
+        , missingField "Missing field description: Use -d to specify"
+            _goguenRegistryEntry_description
         ]
 
+    missingField :: Text -> (PartialGoguenRegistryEntry -> Maybe b) -> Text
     missingField str fld = case fld record of
-        Just _ -> ""
+        Just _  -> ""
         Nothing -> "\n" <> str
 
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
@@ -320,7 +332,7 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             exists <- doesFileExist $ draftFilename fInfo
             let readFn = if exists then dfn else canonicalFilename fInfo
             json <- Aeson.eitherDecodeFileStrict readFn
-            parseJSON json
+            parseJSON (left T.pack json)
         EntryOperationInitialize -> pure $ GoguenRegistryEntry
             { _goguenRegistryEntry_subject = Just (_FileInfoSubject fInfo)
             , _goguenRegistryEntry_policy = Nothing
@@ -338,7 +350,7 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             let strictLogoData = BL.toStrict logoData
             let logoB64 = B64.encode strictLogoData
             let logoB64JSONText = withQuotes $ BL8.unpack $ BL.fromStrict logoB64
-            fmap Just $ dieOnLeft "Loading image data" $ do
+            fmap Just $ dieOnLeft "Loading image data" $ left T.pack $ do
                 pv :: PropertyValue <- left T.unpack $ propertyValueFromString logoB64JSONText
                 emptyAttested . WellKnown pv <$> Aeson.parseEither parseWellKnown pv
         Nothing ->
@@ -368,9 +380,9 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
 
     exitSuccess
   where
-    dieOnLeft :: String -> Either String a -> IO a
+    dieOnLeft :: Text -> Either Text a -> IO a
     dieOnLeft lbl eVal = case eVal of
-        Left err  -> die $ T.pack $ lbl <> ": " <> err
+        Left err  -> die $ lbl <> ": " <> err
         Right val -> pure val
 
     readKeyFile :: FilePath -> IO SomeSigningKey
@@ -386,10 +398,10 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
       where
         orElse_ a b = either (const b) Right a
 
-    parseJSON :: Either String Aeson.Value -> IO (PartialGoguenRegistryEntry)
+    parseJSON :: Either Text Aeson.Value -> IO (PartialGoguenRegistryEntry)
     parseJSON registryJSON = dieOnLeft "Parse error" $ do
         json <- registryJSON
-        Aeson.parseEither parseRegistryEntry json
+        left T.pack $ Aeson.parseEither parseRegistryEntry json
 
 argumentParser :: Maybe Subject -> OA.Parser Arguments
 argumentParser defaultSubject = asum

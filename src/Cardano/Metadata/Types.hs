@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
@@ -15,6 +16,7 @@ module Cardano.Metadata.Types
     , Policy (..)
     , hashPolicy
     , evaluatePolicy
+    , prettyPolicy
     , Property (..)
     , hashProperty
     , PropertyValue (..)
@@ -79,6 +81,7 @@ import Cardano.Crypto.Hash
 import Cardano.Ledger.ShelleyMA.Timelocks
     ( Timelock (RequireAllOf, RequireAnyOf, RequireMOf, RequireSignature, RequireTimeExpire, RequireTimeStart)
     , ValidityInterval (..)
+    , ppTimelock
     )
 import Cardano.Slotting.Slot
     ( SlotNo (..) )
@@ -131,6 +134,15 @@ data Policy = Policy
     { rawPolicy :: Text
     , getPolicy :: ScriptInEra MaryEra
     } deriving Show
+
+prettyPolicy :: Policy -> Text
+prettyPolicy = \case
+    Policy _ (ScriptInEra _ (SimpleScript SimpleScriptV1 s)) ->
+        show $ ppTimelock $ toAllegraTimelock s
+    Policy _ (ScriptInEra _ (SimpleScript SimpleScriptV2 s)) ->
+        show $ ppTimelock $ toAllegraTimelock s
+    Policy _ (ScriptInEra _ (PlutusScript _ _)) ->
+        panic "impossible"
 
 hashPolicy :: Policy -> ScriptHash
 hashPolicy (Policy _ (ScriptInEra _ script)) =
@@ -324,20 +336,6 @@ evaluatePolicy (Policy _ script) atSlot sigs =
     hashes = Set.fromList
         $ Shelley.hashKey . Shelley.VKey . _attestationSignature_publicKey <$> sigs
 
-    -- | Conversion for the 'Timelock.Timelock' language that is shared between the
-    -- Allegra and Mary eras.
-    --
-    toAllegraTimelock :: forall lang. SimpleScript lang -> Timelock StandardCrypto
-    toAllegraTimelock = go
-      where
-        go :: SimpleScript lang -> Timelock StandardCrypto
-        go (Api.RequireSignature (Api.PaymentKeyHash kh)) = RequireSignature (Shelley.coerceKeyRole kh)
-        go (Api.RequireAllOf s) = RequireAllOf (Seq.fromList (map go s))
-        go (Api.RequireAnyOf s) = RequireAnyOf (Seq.fromList (map go s))
-        go (Api.RequireMOf m s) = RequireMOf m (Seq.fromList (map go s))
-        go (Api.RequireTimeBefore _ t) = RequireTimeExpire t
-        go (Api.RequireTimeAfter  _ t) = RequireTimeStart  t
-
     evalTimelock
         :: (crypto ~ StandardCrypto)
         => Set (KeyHash 'Witness crypto)
@@ -366,6 +364,20 @@ evaluatePolicy (Policy _ script) atSlot sigs =
     ltePosInfty :: StrictMaybe SlotNo -> SlotNo -> Bool
     ltePosInfty SNothing _ = False -- ∞ > j
     ltePosInfty (SJust i) j = i <= j
+
+-- | Conversion for the 'Timelock.Timelock' language that is shared between the
+-- Allegra and Mary eras.
+--
+toAllegraTimelock :: forall lang. SimpleScript lang -> Timelock StandardCrypto
+toAllegraTimelock = go
+  where
+    go :: SimpleScript lang -> Timelock StandardCrypto
+    go (Api.RequireSignature (Api.PaymentKeyHash kh)) = RequireSignature (Shelley.coerceKeyRole kh)
+    go (Api.RequireAllOf s) = RequireAllOf (Seq.fromList (map go s))
+    go (Api.RequireAnyOf s) = RequireAnyOf (Seq.fromList (map go s))
+    go (Api.RequireMOf m s) = RequireMOf m (Seq.fromList (map go s))
+    go (Api.RequireTimeBefore _ t) = RequireTimeExpire t
+    go (Api.RequireTimeAfter  _ t) = RequireTimeStart  t
 
 -- TODO: Add a tag type that allows all well known properties to be enumerated
 class WellKnownProperty p where

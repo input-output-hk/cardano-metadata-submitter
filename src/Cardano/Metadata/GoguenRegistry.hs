@@ -46,8 +46,6 @@ import Control.Monad.Fail
     ( fail )
 import Data.Aeson
     ( (.:), (.:?) )
-import Prelude
-    ( String )
 
 import qualified AesonHelpers
 import qualified Data.Aeson as Aeson
@@ -229,10 +227,10 @@ parseAnnotatedSignature f o = do
 verifyPolicy
     :: Policy
     -> Subject
-    -> Either String ()
+    -> Either Text ()
 verifyPolicy policy (Subject subject) = do
     let policyId = T.pack . B8.unpack . serialiseToRawBytesHex . hashPolicy $ policy
-    unless (policyId `T.isPrefixOf` subject) $ Left $ T.unpack $ unlines
+    unless (policyId `T.isPrefixOf` subject) $ Left $ unlines
         [ "The policy should re-hash to the first 28 bytes of the subject."
         , "Expected: " <> T.take 56 subject
         , "Got: " <> policyId
