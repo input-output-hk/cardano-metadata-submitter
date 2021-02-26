@@ -14,23 +14,19 @@ import Cardano.Metadata.GoguenRegistry
     ( GoguenRegistryEntry (..)
     , PartialGoguenRegistryEntry
     , parseRegistryEntry
-    , serializeRegistryEntry
-    , verifyPolicy
     )
 import Cardano.Metadata.Types
     ( Attested (..)
     , MakeAttestationSignature (..)
-    , PropertyValue (..)
     , SomeSigningKey (..)
     , Subject (..)
-    , WellKnown (..)
     , WellKnownProperty (..)
     , emptyAttested
     , evaluatePolicy
     , hashesForAttestation
     , prettyPolicy
-    , propertyValueFromString
     , verifyAttested
+    , verifyPolicy
     )
 import Cardano.Slotting.Slot
     ( SlotNo (..) )
@@ -48,9 +44,11 @@ import System.Environment
     ( lookupEnv )
 
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.Encode.Pretty as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
@@ -114,20 +112,15 @@ data Arguments
     deriving Show
 
 wellKnownOption
-  :: forall p. WellKnownProperty p
-  => (String -> Text)
-  -> OA.Mod OA.OptionFields (WellKnown p)
-  -> OA.Parser (WellKnown p)
-wellKnownOption strTransform =
+    :: forall p. WellKnownProperty p
+    => OA.Mod OA.OptionFields p
+    -> OA.Parser p
+wellKnownOption =
     OA.option wellKnownReader
   where
-    wellKnownReader :: OA.ReadM (WellKnown p)
-    wellKnownReader = OA.eitherReader $ \str -> do
-        pv :: PropertyValue <- left T.unpack $ propertyValueFromString $ strTransform str
-        WellKnown pv <$> Aeson.parseEither parseWellKnown pv
-
-withQuotes :: String -> Text
-withQuotes s = "\"" <> T.pack s <> "\""
+    wellKnownReader :: OA.ReadM p
+    wellKnownReader = OA.eitherReader $
+        Aeson.parseEither parseWellKnown . Aeson.toJSON
 
 entryUpdateArgumentParser :: Maybe Subject -> OA.Parser EntryUpdateArguments
 entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
@@ -178,13 +171,13 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
 
     goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
     goguenRegistryEntryParser = GoguenRegistryEntry Nothing
-        <$> optional (_wellKnown_structured <$> wellKnownOption withQuotes (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
-        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
-        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
+        <$> optional (wellKnownOption (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
+        <*> optional (emptyAttested <$> wellKnownOption (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
+        <*> optional (emptyAttested <$> wellKnownOption (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
         <*> pure Nothing
-        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
-        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "unit" <> OA.short 'u' <> OA.metavar "UNIT"))
-        <*> optional (emptyAttested <$> wellKnownOption withQuotes (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
+        <*> optional (emptyAttested <$> wellKnownOption (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
+        <*> optional (emptyAttested <$> wellKnownOption (OA.long "unit" <> OA.short 'u' <> OA.metavar "UNIT"))
+        <*> optional (emptyAttested <$> wellKnownOption (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
 
 combineRegistryEntries
     :: GoguenRegistryEntry Maybe
@@ -210,13 +203,12 @@ combineRegistryEntries new old = GoguenRegistryEntry
     }
   where
     combineAttestedEntry a b = case (a, b) of
-        (Just (Attested sigA nA valA), Just (Attested sigB nB valB)) | raw valA == raw valB ->
+        (Just (Attested sigA nA valA), Just (Attested sigB nB valB)) | valA == valB ->
             Just $ Attested (sigA ++ sigB) (max nA nB) valA
         (Just (Attested sigs nA val), Just (Attested _ nB _)) ->
             Just $ Attested sigs (max nA nB + 1) val
         _ ->
             a <|> b
-    raw (WellKnown (PropertyValue r _) _) = r
 
 attestFields
     :: SomeSigningKey
@@ -246,8 +238,8 @@ attestFields (SomeSigningKey someSigningKey) props old = do
         :: WellKnownProperty p
         => AttestationField
         -> Subject
-        -> Attested (WellKnown p)
-        -> Attested (WellKnown p)
+        -> Attested p
+        -> Attested p
     attestField fld subj (Attested att n wk) =
         if fld `elem` props
         then Attested attestations n wk
@@ -336,13 +328,10 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
 
     logoInfo <- case logoFname of
         Just fname -> do
-            logoData <- BL.readFile fname
-            let strictLogoData = BL.toStrict logoData
-            let logoB64 = B64.encode strictLogoData
-            let logoB64JSONText = withQuotes $ BL8.unpack $ BL.fromStrict logoB64
-            fmap Just $ dieOnLeft "Loading image data" $ left T.pack $ do
-                pv :: PropertyValue <- left T.unpack $ propertyValueFromString logoB64JSONText
-                emptyAttested . WellKnown pv <$> Aeson.parseEither parseWellKnown pv
+            logo <- BS.readFile fname
+            let logoAsJSON = Aeson.toJSON $ B8.unpack $ B64.encode logo
+            fmap Just $ dieOnLeft "Loading image data" $ left T.pack $
+                emptyAttested <$> Aeson.parseEither parseWellKnown logoAsJSON
         Nothing ->
             pure Nothing
 
@@ -357,9 +346,8 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
     slot <- getCurrentSlot mainnetShelleyStartTime mainnetShelleyStartSlot mainnetShelleySlotLength
 
     let finalVerificationStatus = verifyEverything slot newRecordWithAttestations
-    let outputString = show (serializeRegistryEntry newRecordWithAttestations) <> "\n"
 
-    writeFile (draftFilename fInfo) outputString
+    BL8.writeFile (draftFilename fInfo) (Aeson.encodePretty newRecordWithAttestations)
     case _FileInfoDraftStatus fInfo of
         DraftStatusFinal -> do
             dieOnLeft "Finalizing" finalVerificationStatus

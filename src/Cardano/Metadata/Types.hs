@@ -6,7 +6,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE ViewPatterns #-}
 
@@ -17,13 +17,9 @@ module Cardano.Metadata.Types
     , hashPolicy
     , evaluatePolicy
     , prettyPolicy
+    , verifyPolicy
     , Property (..)
     , hashProperty
-    , PropertyValue (..)
-    , propertyValueFromString
-    , propertyValueToString
-    , propertyValueToJson
-    , hashPropertyValue
     , AttestationSignature (..)
     , MakeAttestationSignature(..)
     , SomeSigningKey (..)
@@ -32,18 +28,18 @@ module Cardano.Metadata.Types
     , hashesForAttestation
     , attestationDigest
     , Attested (..)
+    , parseWithAttestation
     , emptyAttested
     , isAttestedBy
     , verifyAttested
     , WellKnownProperty (..)
-    , WellKnown (..)
+    , hashWellKnownProperty
     , Name (..)
     , Description (..)
     , Logo (..)
     , Url(..)
     , Ticker(..)
     , Unit(..)
-    , parseUnit
     ) where
 
 import Cardano.Prelude
@@ -62,15 +58,19 @@ import Cardano.Api
     , deserialiseFromCBOR
     , hashScript
     , serialiseToRawBytes
+    , serialiseToRawBytesHex
     )
 import Cardano.Crypto.DSIGN
-    ( Ed25519DSIGN
+    ( DSIGNAlgorithm
+    , Ed25519DSIGN
     , SigDSIGN
     , VerKeyDSIGN
     , deriveVerKeyDSIGN
     , rawDeserialiseSigDSIGN
     , rawDeserialiseSignKeyDSIGN
     , rawDeserialiseVerKeyDSIGN
+    , rawSerialiseSigDSIGN
+    , rawSerialiseVerKeyDSIGN
     , signDSIGN
     , verifyDSIGN
     )
@@ -90,7 +90,7 @@ import Control.Category
 import Control.Monad.Fail
     ( fail )
 import Data.Aeson
-    ( (.:) )
+    ( ToJSON (..), (.:), (.=) )
 import Data.Maybe
     ( fromJust )
 import Data.Text
@@ -116,6 +116,7 @@ import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.Sequence.Strict as Seq
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -123,7 +124,8 @@ import qualified Data.Text.Encoding as T
 import qualified Shelley.Spec.Ledger.Keys as Shelley
 
 newtype Subject = Subject { unSubject :: Text }
-    deriving Show
+    deriving stock Show
+    deriving newtype (ToJSON)
 
 hashSubject :: Subject -> Hash Blake2b_256 Subject
 hashSubject = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unSubject)
@@ -132,6 +134,16 @@ data Policy = Policy
     { rawPolicy :: Text
     , getPolicy :: ScriptInEra MaryEra
     } deriving Show
+
+instance WellKnownProperty Policy where
+    wellKnownPropertyName _ =
+        Property "policy"
+    wellKnownToBytes =
+        CBOR.encodeString . rawPolicy
+    wellKnownToJSON =
+        toJSON . rawPolicy
+    parseWellKnown =
+        Aeson.withText "policy" validateMetadataPolicy
 
 prettyPolicy :: Policy -> Text
 prettyPolicy = \case
@@ -146,39 +158,24 @@ hashPolicy :: Policy -> ScriptHash
 hashPolicy (Policy _ (ScriptInEra _ script)) =
     hashScript script
 
-instance WellKnownProperty Policy where
-    wellKnownPropertyName _ = Property "policy"
-    wellKnownEncoding = CBOR.encodeString . rawPolicy
-    parseWellKnown = Aeson.withText "policy"
-        validateMetadataPolicy . propertyValueToJson
+verifyPolicy
+    :: Policy
+    -> Subject
+    -> Either Text ()
+verifyPolicy policy (Subject subject) = do
+    let policyId = T.pack . B8.unpack . serialiseToRawBytesHex . hashPolicy $ policy
+    unless (policyId `T.isPrefixOf` subject) $ Left $ unlines
+        [ "The policy should re-hash to the first 28 bytes of the subject."
+        , "Expected: " <> T.take 56 subject
+        , "Got: " <> policyId
+        ]
 
+data Value
 newtype Property = Property { unProperty :: Text }
     deriving (Show, Eq, Ord)
 
 hashProperty :: Property -> Hash Blake2b_256 Property
 hashProperty = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unProperty)
-
--- | Metadata property values must be parseable as JSON, but they are utf-8 encoded strings.
-data PropertyValue = PropertyValue
-    { _propertyValue_raw :: Text
-    , _propertyValue_parse :: Aeson.Value
-    } deriving Show
-
--- | Smart constructor guards creation of 'PropertyValue's so that we can
--- verify that they are valid JSON. 'Left' signals an aeson error.
-propertyValueFromString :: Text -> Either Text PropertyValue
-propertyValueFromString t = bimap T.pack (PropertyValue t) $
-    Aeson.eitherDecodeStrict @Aeson.Value (T.encodeUtf8 t)
-
-propertyValueToString :: PropertyValue -> Text
-propertyValueToString = _propertyValue_raw
-
-propertyValueToJson :: PropertyValue -> Aeson.Value
-propertyValueToJson = _propertyValue_parse
-
-hashPropertyValue :: WellKnownProperty p => WellKnown p -> Hash Blake2b_256 PropertyValue
-hashPropertyValue = castHash .
-    hashWith (CBOR.toStrictByteString . wellKnownEncoding . _wellKnown_structured)
 
 -- | An 'AttestationSignature is a pair of a public key and a signature
 -- that can be verified with that public key of a message derived from
@@ -189,6 +186,34 @@ data AttestationSignature = AttestationSignature
     { _attestationSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
     , _attestationSignature_signature :: SigDSIGN Ed25519DSIGN
     } deriving Show
+
+instance ToJSON AttestationSignature where
+    toJSON a = Aeson.object
+        [ "publicKey" .=
+            B8.unpack (B16.encode $ rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey a))
+        , "signature" .=
+            B8.unpack (B16.encode $ rawSerialiseSigDSIGN (_attestationSignature_signature a))
+        ]
+
+parseAnnotatedSignature
+    :: DSIGNAlgorithm v
+    => (VerKeyDSIGN v -> SigDSIGN v -> x)
+    -> Aeson.Object
+    -> Aeson.Parser x
+parseAnnotatedSignature f o = do
+    publicKeyField <- o .: "publicKey"
+    signatureField <- o .: "signature"
+    publicKey <- flip (Aeson.withText "publicKey") publicKeyField $ \t ->
+        maybe (fail $ T.unpack $ "Couldn't parse verification key: " <> t) pure $
+            rawDeserialiseVerKeyDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
+    signature <- flip (Aeson.withText "signature") signatureField $ \t ->
+        maybe (fail $ T.unpack $ "Couldn't parse signature " <> t) pure $
+            rawDeserialiseSigDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
+    AesonHelpers.noOtherFields "annotated signature" o ["publicKey", "signature"]
+    pure $ f publicKey signature
+  where
+    eitherToMaybe :: Either a b -> Maybe b
+    eitherToMaybe = either (const Nothing) Just
 
 data SomeSigningKey where
     SomeSigningKey
@@ -236,21 +261,25 @@ instance MakeAttestationSignature PaymentExtendedKey where
 data HashesForAttestation = HashesForAttestation
     { _hashesForAttestation_subject :: Hash Blake2b_256 Subject
     , _hashesForAttestation_property :: Hash Blake2b_256 Property
-    , _hashesForAttestation_value :: Hash Blake2b_256 PropertyValue
+    , _hashesForAttestation_value :: Hash Blake2b_256 Value
     , _hashesForAttestation_sequence_number :: Hash Blake2b_256 SequenceNumber
     }
 
 hashesForAttestation
-   :: WellKnownProperty p
+   :: forall p. WellKnownProperty p
    => Subject
-   -> WellKnown p
+   -> p
    -> SequenceNumber
    -> HashesForAttestation
 hashesForAttestation s w n = HashesForAttestation
-    { _hashesForAttestation_subject = hashSubject s
-    , _hashesForAttestation_property = hashProperty (wellKnownPropertyName w)
-    , _hashesForAttestation_value = hashPropertyValue w
-    , _hashesForAttestation_sequence_number = hashSequenceNumber n
+    { _hashesForAttestation_subject =
+        hashSubject s
+    , _hashesForAttestation_property =
+        hashProperty (wellKnownPropertyName (Proxy @p))
+    , _hashesForAttestation_value =
+        hashWellKnownProperty w
+    , _hashesForAttestation_sequence_number =
+        hashSequenceNumber n
     }
 
 attestationDigest
@@ -271,9 +300,31 @@ data Attested a = Attested
     , _attested_property :: a
     } deriving (Functor, Show)
 
+instance ToJSON a => ToJSON (Attested a) where
+    toJSON a = Aeson.object
+        [ "value" .= _attested_property a
+        , "sequenceNumber" .= _attested_sequence_number a
+        , "signatures" .= _attested_signatures a
+        ]
+
+parseWithAttestation
+    :: WellKnownProperty p
+    => Aeson.Value
+    -> Aeson.Parser (Attested p)
+parseWithAttestation = Aeson.withObject "property with attestation" $ \o -> do
+    value <- parseWellKnown =<< o .: "value"
+    attestations <- (o .: "signatures" >>=) $ Aeson.withArray "Annotated Signatures" $
+        fmap toList . mapM (Aeson.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
+    sequenceNumber <- SequenceNumber <$> o .: "sequenceNumber"
+    pure $ Attested
+        { _attested_signatures = attestations
+        , _attested_property = value
+        , _attested_sequence_number = sequenceNumber
+        }
+
 newtype SequenceNumber = SequenceNumber Int
     deriving stock (Eq, Show, Read, Ord)
-    deriving newtype (Num, Enum, Real, Integral)
+    deriving newtype (Num, Enum, Real, Integral, ToJSON)
 
 hashSequenceNumber
     :: SequenceNumber
@@ -379,68 +430,79 @@ toAllegraTimelock = go
     go (Api.RequireTimeBefore _ t) = RequireTimeExpire t
     go (Api.RequireTimeAfter  _ t) = RequireTimeStart  t
 
--- TODO: Add a tag type that allows all well known properties to be enumerated
 class WellKnownProperty p where
     wellKnownPropertyName :: f p -> Property
-    wellKnownEncoding :: p -> CBOR.Encoding
-    parseWellKnown :: PropertyValue -> Aeson.Parser p
+    wellKnownToBytes :: p -> CBOR.Encoding
+    wellKnownToJSON :: p -> Aeson.Value
+    parseWellKnown :: Aeson.Value -> Aeson.Parser p
 
-data WellKnown p where
-    WellKnown :: WellKnownProperty p =>
-        { _wellKnown_raw :: PropertyValue
-        , _wellKnown_structured :: p
-        } -> WellKnown p
-
-deriving instance Show p => Show (WellKnown p)
+hashWellKnownProperty :: WellKnownProperty p => p -> Hash Blake2b_256 Value
+hashWellKnownProperty = castHash . hashWith (CBOR.toStrictByteString . wellKnownToBytes)
 
 -- | "name" is a well-known property whose value must be a string
 newtype Name = Name { unName :: Text }
-    deriving Show
+    deriving (Show, Eq)
 
 instance WellKnownProperty Name where
-    wellKnownPropertyName _ = Property "name"
-    wellKnownEncoding = CBOR.encodeString . unName
-    parseWellKnown = Aeson.withText "name"
-        validateMetadataName . propertyValueToJson
+    wellKnownPropertyName _ =
+        Property "name"
+    wellKnownToBytes =
+        CBOR.encodeString . unName
+    wellKnownToJSON =
+        toJSON . unName
+    parseWellKnown =
+        Aeson.withText "name" validateMetadataName
 
 -- | "description" is a well-known property whose value must be a string
 newtype Description = Description { unDescription :: Text }
-    deriving Show
+    deriving stock (Show, Eq)
+    deriving newtype (ToJSON)
 
 instance WellKnownProperty Description where
-    wellKnownPropertyName _ = Property "description"
-    wellKnownEncoding = CBOR.encodeString . unDescription
-    parseWellKnown = Aeson.withText "description"
-        validateMetadataDescription . propertyValueToJson
+    wellKnownPropertyName _ =
+        Property "description"
+    wellKnownToBytes =
+        CBOR.encodeString . unDescription
+    wellKnownToJSON =
+        toJSON . unDescription
+    parseWellKnown =
+        Aeson.withText "description" validateMetadataDescription
 
-data Logo = Logo
-    { _logo_png_contents :: ByteString
-    } deriving Show
+newtype Logo = Logo { unLogo :: ByteString }
+    deriving (Show, Eq)
 
 instance WellKnownProperty Logo where
-    wellKnownPropertyName _ = Property "logo"
-    wellKnownEncoding = CBOR.encodeBytes . _logo_png_contents
-    parseWellKnown = Aeson.withText "logo"
-        (either fail validateMetadataLogo . B64.decode . T.encodeUtf8) .  propertyValueToJson
+    wellKnownPropertyName _ =
+        Property "logo"
+    wellKnownToBytes =
+        CBOR.encodeBytes . unLogo
+    wellKnownToJSON =
+        toJSON . B8.unpack . B64.encode . unLogo
+    parseWellKnown =
+        Aeson.withText "logo" (either fail validateMetadataLogo . B64.decode . T.encodeUtf8)
 
-newtype Url = Url
-    { unUrl :: URI
-    } deriving Show
+newtype Url = Url { unUrl :: URI }
+    deriving (Show, Eq)
 
 instance WellKnownProperty Url where
-    wellKnownPropertyName _ = Property "url"
-    wellKnownEncoding = CBOR.encodeString . show
-    parseWellKnown = Aeson.withText "url"
-        validateMetadataURL . propertyValueToJson
+    wellKnownPropertyName _ =
+        Property "url"
+    wellKnownToBytes =
+        CBOR.encodeString . show . unUrl
+    wellKnownToJSON =
+        toJSON . show @_ @Text . unUrl
+    parseWellKnown =
+        Aeson.withText "url" validateMetadataURL
 
 data Unit = Unit
     { unitName :: Text
     , unitDecimals :: Integer
-    } deriving Show
+    } deriving (Show, Eq)
 
 instance WellKnownProperty Unit where
-    wellKnownPropertyName _ = Property "unit"
-    wellKnownEncoding u = mconcat
+    wellKnownPropertyName _ =
+        Property "unit"
+    wellKnownToBytes u = mconcat
         [ CBOR.encodeMapLenIndef
         , CBOR.encodeString "name"
         , CBOR.encodeString (unitName u)
@@ -448,35 +510,35 @@ instance WellKnownProperty Unit where
         , CBOR.encodeWord (fromIntegral $ unitDecimals u)
         , CBOR.encodeBreak
         ]
-    parseWellKnown =
-        parseUnit . propertyValueToJson
+    wellKnownToJSON u = Aeson.object
+        [ "name" .= unitName u
+        , "decimals" .=  unitDecimals u
+        ]
+    parseWellKnown = \v -> parseAsText v <|> parseAsObject v
+      where
+        parseAsText = Aeson.withText "unit" $ \t -> case decimal t of
+            Left e -> fail e
+            Right (decimals, name) ->
+                validateMetadataUnit (T.drop 1 name) decimals
 
-parseUnit
-    :: Aeson.Value
-    -> Aeson.Parser Unit
-parseUnit v =
-    parseAsText v <|> parseAsObject v
-  where
-    parseAsText = Aeson.withText "unit" $ \t -> case decimal t of
-        Left e -> fail e
-        Right (decimals, name) ->
-            validateMetadataUnit (T.drop 1 name) decimals
+        parseAsObject = Aeson.withObject "unit" $ \o -> do
+            name <- Aeson.prependFailure "unit" (o .: "name")
+            decimals <- Aeson.prependFailure "unit" (o .: "decimals")
+            AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
+            validateMetadataUnit name decimals
 
-    parseAsObject = Aeson.withObject "unit" $ \o -> do
-        name <- Aeson.prependFailure "unit" (o .: "name")
-        decimals <- Aeson.prependFailure "unit" (o .: "decimals")
-        AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
-        validateMetadataUnit name decimals
-
-newtype Ticker = Ticker
-    { unTicker :: Text
-    } deriving Show
+newtype Ticker = Ticker { unTicker :: Text }
+    deriving (Show, Eq)
 
 instance WellKnownProperty Ticker where
-    wellKnownPropertyName _ = Property "ticker"
-    wellKnownEncoding = CBOR.encodeString . unTicker
-    parseWellKnown = Aeson.withText "ticker"
-        validateMetadataTicker . propertyValueToJson
+    wellKnownPropertyName _ =
+        Property "ticker"
+    wellKnownToBytes =
+        CBOR.encodeString . unTicker
+    wellKnownToJSON =
+        toJSON . unTicker
+    parseWellKnown =
+        Aeson.withText "ticker" validateMetadataTicker
 
 --
 -- Validators

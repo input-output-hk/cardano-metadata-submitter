@@ -24,8 +24,6 @@ library
                , base16-bytestring
                , base64-bytestring
                , bytestring
-               , hex-text
-               , prettyprinter
                , text
                , unordered-containers
                , network-uri
@@ -51,6 +49,7 @@ executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
   build-depends:       base ^>=4.12.0.0
                      , aeson
+                     , aeson-pretty
                      , base64-bytestring
                      , bytestring
                      , cardano-prelude
