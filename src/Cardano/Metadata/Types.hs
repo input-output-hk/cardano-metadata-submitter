@@ -113,9 +113,9 @@ import qualified Codec.CBOR.Encoding as CBOR
 import qualified Codec.CBOR.Write as CBOR
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
+import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Base64 as B64
-import qualified Data.ByteString.Lazy as BL
 import qualified Data.Sequence.Strict as Seq
 import qualified Data.Set as Set
 import qualified Data.Text as T
@@ -126,7 +126,7 @@ newtype Subject = Subject { unSubject :: Text }
     deriving Show
 
 hashSubject :: Subject -> Hash Blake2b_256 Subject
-hashSubject = hashWith (T.encodeUtf8 . unSubject)
+hashSubject = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unSubject)
 
 data Policy = Policy
     { rawPolicy :: Text
@@ -148,6 +148,7 @@ hashPolicy (Policy _ (ScriptInEra _ script)) =
 
 instance WellKnownProperty Policy where
     wellKnownPropertyName _ = Property "policy"
+    wellKnownEncoding = CBOR.encodeString . rawPolicy
     parseWellKnown = Aeson.withText "policy"
         validateMetadataPolicy . propertyValueToJson
 
@@ -155,7 +156,7 @@ newtype Property = Property { unProperty :: Text }
     deriving (Show, Eq, Ord)
 
 hashProperty :: Property -> Hash Blake2b_256 Property
-hashProperty = hashWith (T.encodeUtf8 . unProperty)
+hashProperty = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unProperty)
 
 -- | Metadata property values must be parseable as JSON, but they are utf-8 encoded strings.
 data PropertyValue = PropertyValue
@@ -175,8 +176,9 @@ propertyValueToString = _propertyValue_raw
 propertyValueToJson :: PropertyValue -> Aeson.Value
 propertyValueToJson = _propertyValue_parse
 
-hashPropertyValue :: PropertyValue -> Hash Blake2b_256 PropertyValue
-hashPropertyValue = hashWith (T.encodeUtf8 . propertyValueToString)
+hashPropertyValue :: WellKnownProperty p => WellKnown p -> Hash Blake2b_256 PropertyValue
+hashPropertyValue = castHash .
+    hashWith (CBOR.toStrictByteString . wellKnownEncoding . _wellKnown_structured)
 
 -- | An 'AttestationSignature is a pair of a public key and a signature
 -- that can be verified with that public key of a message derived from
@@ -239,15 +241,15 @@ data HashesForAttestation = HashesForAttestation
     }
 
 hashesForAttestation
-   :: Subject
-   -> Property
-   -> PropertyValue
+   :: WellKnownProperty p
+   => Subject
+   -> WellKnown p
    -> SequenceNumber
    -> HashesForAttestation
-hashesForAttestation s p v n = HashesForAttestation
+hashesForAttestation s w n = HashesForAttestation
     { _hashesForAttestation_subject = hashSubject s
-    , _hashesForAttestation_property = hashProperty p
-    , _hashesForAttestation_value = hashPropertyValue v
+    , _hashesForAttestation_property = hashProperty (wellKnownPropertyName w)
+    , _hashesForAttestation_value = hashPropertyValue w
     , _hashesForAttestation_sequence_number = hashSequenceNumber n
     }
 
@@ -380,6 +382,7 @@ toAllegraTimelock = go
 -- TODO: Add a tag type that allows all well known properties to be enumerated
 class WellKnownProperty p where
     wellKnownPropertyName :: f p -> Property
+    wellKnownEncoding :: p -> CBOR.Encoding
     parseWellKnown :: PropertyValue -> Aeson.Parser p
 
 data WellKnown p where
@@ -396,6 +399,7 @@ newtype Name = Name { unName :: Text }
 
 instance WellKnownProperty Name where
     wellKnownPropertyName _ = Property "name"
+    wellKnownEncoding = CBOR.encodeString . unName
     parseWellKnown = Aeson.withText "name"
         validateMetadataName . propertyValueToJson
 
@@ -405,17 +409,19 @@ newtype Description = Description { unDescription :: Text }
 
 instance WellKnownProperty Description where
     wellKnownPropertyName _ = Property "description"
+    wellKnownEncoding = CBOR.encodeString . unDescription
     parseWellKnown = Aeson.withText "description"
         validateMetadataDescription . propertyValueToJson
 
 data Logo = Logo
-    { _logo_png_contents :: BL.ByteString
+    { _logo_png_contents :: ByteString
     } deriving Show
 
 instance WellKnownProperty Logo where
     wellKnownPropertyName _ = Property "logo"
+    wellKnownEncoding = CBOR.encodeBytes . _logo_png_contents
     parseWellKnown = Aeson.withText "logo"
-        (either fail (validateMetadataLogo . BL.fromStrict) . B64.decode . T.encodeUtf8) .  propertyValueToJson
+        (either fail validateMetadataLogo . B64.decode . T.encodeUtf8) .  propertyValueToJson
 
 newtype Url = Url
     { unUrl :: URI
@@ -423,6 +429,7 @@ newtype Url = Url
 
 instance WellKnownProperty Url where
     wellKnownPropertyName _ = Property "url"
+    wellKnownEncoding = CBOR.encodeString . show
     parseWellKnown = Aeson.withText "url"
         validateMetadataURL . propertyValueToJson
 
@@ -433,6 +440,14 @@ data Unit = Unit
 
 instance WellKnownProperty Unit where
     wellKnownPropertyName _ = Property "unit"
+    wellKnownEncoding u = mconcat
+        [ CBOR.encodeMapLenIndef
+        , CBOR.encodeString "name"
+        , CBOR.encodeString (unitName u)
+        , CBOR.encodeString "decimals"
+        , CBOR.encodeWord (fromIntegral $ unitDecimals u)
+        , CBOR.encodeBreak
+        ]
     parseWellKnown =
         parseUnit . propertyValueToJson
 
@@ -459,6 +474,7 @@ newtype Ticker = Ticker
 
 instance WellKnownProperty Ticker where
     wellKnownPropertyName _ = Property "ticker"
+    wellKnownEncoding = CBOR.encodeString . unTicker
     parseWellKnown = Aeson.withText "ticker"
         validateMetadataTicker . propertyValueToJson
 
@@ -520,15 +536,15 @@ validateMetadataUnit name decimals = Unit name decimals <$
     >> validateMaximum 20 decimals >>= validateMinimum 0
     )
 
-validateMetadataLogo :: MonadFail f => BL.ByteString -> f Logo
+validateMetadataLogo :: MonadFail f => ByteString -> f Logo
 validateMetadataLogo bytes
     | len <= maxLen =
-        case decodePng (BL.toStrict bytes) of
+        case decodePng bytes of
             Left e     -> fail $ "Verifying PNG: " <> e
             Right _png -> pure (Logo bytes)
     | otherwise = fail $ "Length must be no more than " ++ show maxLen ++ " bytes, got " ++ show len
   where
-    len = BL.length bytes
+    len = BS.length bytes
     maxLen = 65536
 
 validateMetadataURL :: MonadFail f => Text -> f Url

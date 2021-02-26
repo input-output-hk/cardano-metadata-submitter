@@ -19,7 +19,6 @@ import Cardano.Metadata.GoguenRegistry
     )
 import Cardano.Metadata.Types
     ( Attested (..)
-    , HashesForAttestation (..)
     , MakeAttestationSignature (..)
     , PropertyValue (..)
     , SomeSigningKey (..)
@@ -249,22 +248,14 @@ attestFields (SomeSigningKey someSigningKey) props old = do
         -> Subject
         -> Attested (WellKnown p)
         -> Attested (WellKnown p)
-    attestField fld subj orig@(Attested att n wk) =
+    attestField fld subj (Attested att n wk) =
         if fld `elem` props
         then Attested attestations n wk
         else Attested att n wk
       where
-        wkHash = extractAttestationHashes subj orig
+        wkHash = hashesForAttestation subj wk n
         newAttestationSig = makeAttestationSignature someSigningKey wkHash
         attestations = newAttestationSig:att
-
-extractAttestationHashes
-    :: WellKnownProperty p
-    => Subject
-    -> Attested (WellKnown p)
-    -> HashesForAttestation
-extractAttestationHashes subj (Attested _ n (WellKnown raw structured)) =
-    hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw n
 
 verifyEverything
     :: SlotNo
@@ -281,9 +272,8 @@ verifyEverything atSlot record = do
     verifyPolicy policy subject
 
     -- 3. Verify that all attestations have matching signatures
-    let verifyLocalAttestations fieldName field = do
-            let hashes = extractAttestationHashes subject field
-            let (Attested attestations n _) = field
+    let verifyLocalAttestations fieldName (Attested attestations n w) = do
+            let hashes = hashesForAttestation subject w n
             left (const $ "attestation verification failed for: " <> fieldName) $ do
                 verifyAttested $ Attested attestations n hashes
             let policyEvaluationFailed = unlines
