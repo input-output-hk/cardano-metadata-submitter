@@ -9,7 +9,23 @@ The instruction below supposes that users have already been through the process 
 ### Creating a new entry 
 
 To create a new entry, you must first obtain your metadata subject. The subject is defined as the concatenation of the base16-encoded `policyId` and base16-encoded `assetName` of your asset. In case
-your `assetName` is empty, then the `policyId` is your subject. From there, initialize a new submission using `--init` as follows:
+your `assetName` is empty, then the `policyId` is your subject. We'll consider the following policy for this tutorial:
+
+```json
+{
+    "type": "all",
+    "scripts": [
+        {
+            "keyHash": "2B0C33E73D2A70733EDC971D19E2CAFBADA1692DB2D35E7DC9453DF2",
+            "type": "sig"
+        }
+    ]
+}
+```
+<p align="right"><strong>policy.json</strong></p>
+
+
+From there, initialize a new submission using `--init` as follows:
 
 ```console
 cardano-metadata-submitter --init 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0
@@ -33,8 +49,11 @@ You can pass multiple commands at once to edit a draft submission. For example:
 cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 \
   --name "ギル" \
   --description "The currency in all of the Final Fantasy games." \
-  --policy "82008201818200581c2b0c33e73d2a70733edc971d19e2cafbada1692db2d35e7dc9453df2"
+  --policy policy.json
 ```
+
+> Alternatively, you can give a raw base16-encoded value for the policy instead of a filepath.
+</details>
 
 ### Add optional fields
 
