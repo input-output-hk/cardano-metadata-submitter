@@ -1,5 +1,6 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Cardano.Prelude
@@ -104,6 +105,7 @@ data EntryUpdateArguments = EntryUpdateArguments
     , _EntryUpdateArgumentsAttestationFields :: [AttestationField]
     , _EntryUpdateArgumentsRegistryEntry :: PartialGoguenRegistryEntry
     , _EntryUpdateLogoFilename :: Maybe String
+    , _EntryUpdatePolicyFilenameOrCBOR :: Maybe String
     }
     deriving Show
 
@@ -129,6 +131,7 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
     <*> attestationFieldNamesParser
     <*> goguenRegistryEntryParser
     <*> logoFilenameParser
+    <*> policyParser
   where
     attestationFieldNamesParser :: OA.Parser [AttestationField]
     attestationFieldNamesParser = asum
@@ -169,12 +172,14 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
     logoFilenameParser :: OA.Parser (Maybe String)
     logoFilenameParser = optional $ OA.strOption (OA.long "logo" <> OA.short 'l' <> OA.metavar "LOGO.png")
 
+    policyParser :: OA.Parser (Maybe String)
+    policyParser = optional (OA.strOption (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
+
     goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
-    goguenRegistryEntryParser = GoguenRegistryEntry Nothing
-        <$> optional (wellKnownOption (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
-        <*> optional (emptyAttested <$> wellKnownOption (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
+    goguenRegistryEntryParser = GoguenRegistryEntry Nothing Nothing
+        <$> optional (emptyAttested <$> wellKnownOption (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
-        <*> pure Nothing
+        <*> pure Nothing -- logo
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "unit" <> OA.short 'u' <> OA.metavar "UNIT"))
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
@@ -305,8 +310,8 @@ verifyEverything atSlot record = do
         Nothing -> "\n" <> str
 
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
-handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps newEntryInfo logoFname) = do
-    attestKey <- mapM readKeyFile attestKeyFile
+handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInfo logoM policyM) = do
+    attestKey <- mapM readKeyFile keyfile
 
     record <- case _FileInfoEntryOperation fInfo of
         EntryOperationRevise -> do
@@ -326,7 +331,19 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
             , _goguenRegistryEntry_ticker = Nothing
             }
 
-    logoInfo <- case logoFname of
+    policy <- case policyM of
+        Just filenameOrCBOR -> do
+            result <- doesFileExist filenameOrCBOR >>= \case
+                True  -> do
+                    json <- Aeson.eitherDecodeFileStrict filenameOrCBOR
+                    pure $ Aeson.parseEither parseWellKnown =<< json
+                False ->
+                    pure $ Aeson.parseEither parseWellKnown (Aeson.toJSON filenameOrCBOR)
+            fmap Just $ dieOnLeft "Loading policy" $ left T.pack result
+        Nothing ->
+            pure Nothing
+
+    logo <- case logoM of
         Just fname -> do
             logo <- BS.readFile fname
             let logoAsJSON = Aeson.toJSON $ B8.unpack $ B64.encode logo
@@ -335,10 +352,13 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo attestKeyFile attestProps
         Nothing ->
             pure Nothing
 
-    let newRecord = combineRegistryEntries (newEntryInfo { _goguenRegistryEntry_logo = logoInfo }) record
+    let newRecord = combineRegistryEntries (newEntryInfo
+            { _goguenRegistryEntry_logo = logo
+            , _goguenRegistryEntry_policy = policy
+            }) record
 
     newRecordWithAttestations <- dieOnLeft "Adding attestation" $ case attestKey of
-        Just k -> attestFields k attestProps newRecord
+        Just k -> attestFields k props newRecord
         Nothing -> pure newRecord
 
     -- FIXME: Allow users to specify a different start time and/or slot

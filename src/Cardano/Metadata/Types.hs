@@ -65,6 +65,7 @@ import Cardano.Api
     , SimpleScriptVersion (..)
     , deserialiseFromCBOR
     , hashScript
+    , serialiseToCBOR
     , serialiseToRawBytes
     , serialiseToRawBytesHex
     )
@@ -98,7 +99,7 @@ import Control.Category
 import Control.Monad.Fail
     ( fail )
 import Data.Aeson
-    ( ToJSON (..), (.:), (.=) )
+    ( FromJSON (..), ToJSON (..), (.:), (.=) )
 import Data.Maybe
     ( fromJust )
 import Data.Text
@@ -175,8 +176,13 @@ instance WellKnownProperty Policy where
         CBOR.encodeString . rawPolicy
     wellKnownToJSON =
         toJSON . rawPolicy
-    parseWellKnown =
-        Aeson.withText "policy" validateMetadataPolicy
+    parseWellKnown = \v -> parseAsText v <|> parseAsObject v
+      where
+        parseAsText = Aeson.withText "policy" validateMetadataPolicy
+        parseAsObject o = parseJSON o <&> \s -> Policy
+            { rawPolicy = T.decodeUtf8 $ B16.encode $ serialiseToCBOR s
+            , getPolicy = s
+            }
 
 prettyPolicy :: Policy -> Text
 prettyPolicy = \case
