@@ -470,6 +470,15 @@ validateMaxLength n text
   where
     len = T.length text
 
+validateMinimum :: MonadFail f => (Ord a, Show a) => a -> a -> f a
+validateMinimum minN n
+    | n > minN = pure n
+    | otherwise = fail $ "Value must be strictly greater than " ++ show minN
+
+validateMaximum :: MonadFail f => (Ord a, Show a) => a -> a -> f a
+validateMaximum maxN n
+    | n < maxN = pure n
+    | otherwise = fail $ "Value must be strictly smaller than " ++ show maxN
 
 validateBase16 :: MonadFail f => Text -> f ByteString
 validateBase16 =
@@ -495,10 +504,11 @@ validateMetadataDescription :: MonadFail f => Text -> f Description
 validateMetadataDescription = fmap Description .
     validateMaxLength 500
 
--- | FIXME: validate decimals
 validateMetadataUnit :: MonadFail f => Text -> Integer -> f Unit
 validateMetadataUnit name decimals = Unit name decimals <$
-    (validateMinLength 1 name >>= validateMaxLength 30)
+    (  validateMinLength 1 name >>= validateMaxLength 30
+    >> validateMaximum 20 decimals >>= validateMinimum 0
+    )
 
 validateMetadataLogo :: MonadFail f => BL.ByteString -> f Logo
 validateMetadataLogo bytes
