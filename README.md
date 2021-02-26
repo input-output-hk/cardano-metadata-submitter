@@ -130,3 +130,13 @@ nix = {
 };
 ```
 </details>
+
+## How to test
+
+Pre-requisite: `cardano-metadata-submitter` must be available on your `$PATH`.
+
+```
+$ cd test
+$ npm install
+$ npm test
+```
