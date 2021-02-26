@@ -11,35 +11,43 @@
 {-# LANGUAGE ViewPatterns #-}
 
 module Cardano.Metadata.Types
-    ( Subject (..)
+    ( -- * Subject
+      Subject (..)
     , hashSubject
+
+      -- * WellKnownProperty / Property
+    , WellKnownProperty (..)
+    , hashWellKnownProperty
+    , Property (..)
+    , hashProperty
+
+      -- * Well-known Properties
     , Policy (..)
     , hashPolicy
     , evaluatePolicy
     , prettyPolicy
     , verifyPolicy
-    , Property (..)
-    , hashProperty
-    , AttestationSignature (..)
-    , MakeAttestationSignature(..)
-    , SomeSigningKey (..)
-    , SequenceNumber (..)
-    , HashesForAttestation (..)
-    , hashesForAttestation
-    , attestationDigest
-    , Attested (..)
-    , parseWithAttestation
-    , emptyAttested
-    , isAttestedBy
-    , verifyAttested
-    , WellKnownProperty (..)
-    , hashWellKnownProperty
     , Name (..)
     , Description (..)
     , Logo (..)
     , Url(..)
     , Ticker(..)
     , Unit(..)
+
+      -- * Attestation
+    , Attested (..)
+    , AttestationSignature (..)
+    , SequenceNumber (..)
+    , parseWithAttestation
+    , emptyAttested
+    , isAttestedBy
+    , verifyAttested
+
+      -- * Signing
+    , MakeAttestationSignature(..)
+    , SomeSigningKey (..)
+    , HashesForAttestation (..)
+    , hashesForAttestation
     ) where
 
 import Cardano.Prelude
@@ -123,12 +131,37 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Shelley.Spec.Ledger.Keys as Shelley
 
+--
+-- Subject
+--
+
 newtype Subject = Subject { unSubject :: Text }
     deriving stock Show
     deriving newtype (ToJSON)
 
 hashSubject :: Subject -> Hash Blake2b_256 Subject
 hashSubject = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unSubject)
+
+
+--
+-- WellKnownProperty / Property
+--
+
+class WellKnownProperty p where
+    wellKnownPropertyName :: f p -> Property
+    wellKnownToBytes :: p -> CBOR.Encoding
+    wellKnownToJSON :: p -> Aeson.Value
+    parseWellKnown :: Aeson.Value -> Aeson.Parser p
+
+hashWellKnownProperty :: WellKnownProperty p => p -> Hash Blake2b_256 Value
+hashWellKnownProperty = castHash . hashWith (CBOR.toStrictByteString . wellKnownToBytes)
+
+data Value
+newtype Property = Property { unProperty :: Text }
+    deriving (Show, Eq, Ord)
+
+hashProperty :: Property -> Hash Blake2b_256 Property
+hashProperty = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unProperty)
 
 data Policy = Policy
     { rawPolicy :: Text
@@ -169,198 +202,6 @@ verifyPolicy policy (Subject subject) = do
         , "Expected: " <> T.take 56 subject
         , "Got: " <> policyId
         ]
-
-data Value
-newtype Property = Property { unProperty :: Text }
-    deriving (Show, Eq, Ord)
-
-hashProperty :: Property -> Hash Blake2b_256 Property
-hashProperty = hashWith (CBOR.toStrictByteString . CBOR.encodeString . unProperty)
-
--- | An 'AttestationSignature is a pair of a public key and a signature
--- that can be verified with that public key of a message derived from
--- the subject, property name, and property value being attested to.
---
--- In particular, the message is hash(hash(subject) + hash (property_name) + hash(property_value))
-data AttestationSignature = AttestationSignature
-    { _attestationSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
-    , _attestationSignature_signature :: SigDSIGN Ed25519DSIGN
-    } deriving Show
-
-instance ToJSON AttestationSignature where
-    toJSON a = Aeson.object
-        [ "publicKey" .=
-            B8.unpack (B16.encode $ rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey a))
-        , "signature" .=
-            B8.unpack (B16.encode $ rawSerialiseSigDSIGN (_attestationSignature_signature a))
-        ]
-
-parseAnnotatedSignature
-    :: DSIGNAlgorithm v
-    => (VerKeyDSIGN v -> SigDSIGN v -> x)
-    -> Aeson.Object
-    -> Aeson.Parser x
-parseAnnotatedSignature f o = do
-    publicKeyField <- o .: "publicKey"
-    signatureField <- o .: "signature"
-    publicKey <- flip (Aeson.withText "publicKey") publicKeyField $ \t ->
-        maybe (fail $ T.unpack $ "Couldn't parse verification key: " <> t) pure $
-            rawDeserialiseVerKeyDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
-    signature <- flip (Aeson.withText "signature") signatureField $ \t ->
-        maybe (fail $ T.unpack $ "Couldn't parse signature " <> t) pure $
-            rawDeserialiseSigDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
-    AesonHelpers.noOtherFields "annotated signature" o ["publicKey", "signature"]
-    pure $ f publicKey signature
-  where
-    eitherToMaybe :: Either a b -> Maybe b
-    eitherToMaybe = either (const Nothing) Just
-
-data SomeSigningKey where
-    SomeSigningKey
-        :: forall keyrole. (MakeAttestationSignature keyrole)
-        => SigningKey keyrole
-        -> SomeSigningKey
-
-class MakeAttestationSignature keyrole where
-    makeAttestationSignature
-        :: SigningKey keyrole
-        -> HashesForAttestation
-        -> AttestationSignature
-
-instance MakeAttestationSignature PaymentKey where
-    makeAttestationSignature key hashes =
-        AttestationSignature
-            { _attestationSignature_publicKey =
-                deriveVerKeyDSIGN prv
-            , _attestationSignature_signature = signDSIGN ()
-                (hashToBytes $ attestationDigest hashes)
-                prv
-            }
-      where
-        -- Very ugly cast of a 'PaymentKey' into a SignKeyDSign
-        Just prv = rawDeserialiseSignKeyDSIGN (serialiseToRawBytes key)
-
-instance MakeAttestationSignature PaymentExtendedKey where
-    makeAttestationSignature key hashes =
-        AttestationSignature
-            { _attestationSignature_publicKey = unsafeToVerKeyDSign
-                $ CC.toXPub xprv
-            , _attestationSignature_signature = unsafeToSigDSign
-                $ CC.sign (mempty :: ByteString) xprv (hashToBytes $ attestationDigest hashes)
-            }
-      where
-        -- Very ugly cast of a 'PaymentExtendedKey' into an 'XPrv'
-        Right xprv = CC.xprv (serialiseToRawBytes key)
-        -- NOTE: We can 'safely' cast to VerKeyDSIGN and SigDSIGN for
-        -- verification because the signature verification algorithm is the
-        -- same for extended and normal keys.
-        unsafeToVerKeyDSign = fromJust . rawDeserialiseVerKeyDSIGN . CC.xpubPublicKey
-        unsafeToSigDSign = fromJust . rawDeserialiseSigDSIGN . CC.unXSignature
-
--- | Hashes required to produce a message for attestation purposes
-data HashesForAttestation = HashesForAttestation
-    { _hashesForAttestation_subject :: Hash Blake2b_256 Subject
-    , _hashesForAttestation_property :: Hash Blake2b_256 Property
-    , _hashesForAttestation_value :: Hash Blake2b_256 Value
-    , _hashesForAttestation_sequence_number :: Hash Blake2b_256 SequenceNumber
-    }
-
-hashesForAttestation
-   :: forall p. WellKnownProperty p
-   => Subject
-   -> p
-   -> SequenceNumber
-   -> HashesForAttestation
-hashesForAttestation s w n = HashesForAttestation
-    { _hashesForAttestation_subject =
-        hashSubject s
-    , _hashesForAttestation_property =
-        hashProperty (wellKnownPropertyName (Proxy @p))
-    , _hashesForAttestation_value =
-        hashWellKnownProperty w
-    , _hashesForAttestation_sequence_number =
-        hashSequenceNumber n
-    }
-
-attestationDigest
-    :: HashesForAttestation
-    -> Hash Blake2b_256 HashesForAttestation
-attestationDigest hashes = castHash $ hashWith id $ mconcat
-    [ hashToBytes $ _hashesForAttestation_subject hashes
-    , hashToBytes $ _hashesForAttestation_property hashes
-    , hashToBytes $ _hashesForAttestation_value hashes
-    , hashToBytes $ _hashesForAttestation_sequence_number hashes
-    ]
-
--- | Metadata entries can be provided along with annotated signatures
--- attesting to the validity of those entry values.
-data Attested a = Attested
-    { _attested_signatures :: [AttestationSignature]
-    , _attested_sequence_number :: SequenceNumber
-    , _attested_property :: a
-    } deriving (Functor, Show)
-
-instance ToJSON a => ToJSON (Attested a) where
-    toJSON a = Aeson.object
-        [ "value" .= _attested_property a
-        , "sequenceNumber" .= _attested_sequence_number a
-        , "signatures" .= _attested_signatures a
-        ]
-
-parseWithAttestation
-    :: WellKnownProperty p
-    => Aeson.Value
-    -> Aeson.Parser (Attested p)
-parseWithAttestation = Aeson.withObject "property with attestation" $ \o -> do
-    value <- parseWellKnown =<< o .: "value"
-    attestations <- (o .: "signatures" >>=) $ Aeson.withArray "Annotated Signatures" $
-        fmap toList . mapM (Aeson.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
-    sequenceNumber <- SequenceNumber <$> o .: "sequenceNumber"
-    pure $ Attested
-        { _attested_signatures = attestations
-        , _attested_property = value
-        , _attested_sequence_number = sequenceNumber
-        }
-
-newtype SequenceNumber = SequenceNumber Int
-    deriving stock (Eq, Show, Read, Ord)
-    deriving newtype (Num, Enum, Real, Integral, ToJSON)
-
-hashSequenceNumber
-    :: SequenceNumber
-    -> Hash Blake2b_256 SequenceNumber
-hashSequenceNumber =
-    hashWith (CBOR.toStrictByteString . CBOR.encodeWord . fromIntegral)
-
-emptyAttested
-    :: a
-    -> Attested a
-emptyAttested a = Attested
-    { _attested_signatures = []
-    , _attested_sequence_number = 0
-    , _attested_property = a
-    }
-
-isAttestedBy
-    :: HashesForAttestation
-    -> AttestationSignature
-    -> Either Text ()
-isAttestedBy hashes sig = first T.pack $ verifyDSIGN ()
-    (_attestationSignature_publicKey sig)
-    (hashToBytes (attestationDigest hashes))
-    (_attestationSignature_signature sig)
-
-verifyAttested
-    :: Attested HashesForAttestation
-    -> Either [AttestationSignature] ()
-verifyAttested attested =
-    let
-        (invalids, _) = partitionEithers $ flip fmap (_attested_signatures attested) $ \sig ->
-            first (const sig) $ isAttestedBy (_attested_property attested) sig
-    in
-        case invalids of
-            [] -> Right ()
-            _ -> Left invalids
 
 evaluatePolicy
     :: Policy
@@ -429,15 +270,6 @@ toAllegraTimelock = go
     go (Api.RequireMOf m s) = RequireMOf m (Seq.fromList (map go s))
     go (Api.RequireTimeBefore _ t) = RequireTimeExpire t
     go (Api.RequireTimeAfter  _ t) = RequireTimeStart  t
-
-class WellKnownProperty p where
-    wellKnownPropertyName :: f p -> Property
-    wellKnownToBytes :: p -> CBOR.Encoding
-    wellKnownToJSON :: p -> Aeson.Value
-    parseWellKnown :: Aeson.Value -> Aeson.Parser p
-
-hashWellKnownProperty :: WellKnownProperty p => p -> Hash Blake2b_256 Value
-hashWellKnownProperty = castHash . hashWith (CBOR.toStrictByteString . wellKnownToBytes)
 
 -- | "name" is a well-known property whose value must be a string
 newtype Name = Name { unName :: Text }
@@ -619,3 +451,197 @@ validateMetadataURL = fmap Url .
       validateHttps u@(uriScheme -> scheme)
           | scheme == "https:" = pure u
           | otherwise = fail $ "Scheme must be https: but got " ++ scheme
+
+--
+-- Attesting
+--
+
+-- | Metadata entries can be provided along with annotated signatures
+-- attesting to the validity of those entry values.
+data Attested a = Attested
+    { _attested_signatures :: [AttestationSignature]
+    , _attested_sequence_number :: SequenceNumber
+    , _attested_property :: a
+    } deriving (Functor, Show)
+
+instance ToJSON a => ToJSON (Attested a) where
+    toJSON a = Aeson.object
+        [ "value" .= _attested_property a
+        , "sequenceNumber" .= _attested_sequence_number a
+        , "signatures" .= _attested_signatures a
+        ]
+
+emptyAttested
+    :: a
+    -> Attested a
+emptyAttested a = Attested
+    { _attested_signatures = []
+    , _attested_sequence_number = 0
+    , _attested_property = a
+    }
+
+isAttestedBy
+    :: HashesForAttestation
+    -> AttestationSignature
+    -> Either Text ()
+isAttestedBy hashes sig = first T.pack $ verifyDSIGN ()
+    (_attestationSignature_publicKey sig)
+    (hashToBytes (attestationDigest hashes))
+    (_attestationSignature_signature sig)
+
+verifyAttested
+    :: Attested HashesForAttestation
+    -> Either [AttestationSignature] ()
+verifyAttested attested =
+    let
+        (invalids, _) = partitionEithers $ flip fmap (_attested_signatures attested) $ \sig ->
+            first (const sig) $ isAttestedBy (_attested_property attested) sig
+    in
+        case invalids of
+            [] -> Right ()
+            _ -> Left invalids
+
+parseWithAttestation
+    :: WellKnownProperty p
+    => Aeson.Value
+    -> Aeson.Parser (Attested p)
+parseWithAttestation = Aeson.withObject "property with attestation" $ \o -> do
+    value <- parseWellKnown =<< o .: "value"
+    attestations <- (o .: "signatures" >>=) $ Aeson.withArray "Annotated Signatures" $
+        fmap toList . mapM (Aeson.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
+    sequenceNumber <- SequenceNumber <$> o .: "sequenceNumber"
+    pure $ Attested
+        { _attested_signatures = attestations
+        , _attested_property = value
+        , _attested_sequence_number = sequenceNumber
+        }
+
+-- | An 'AttestationSignature is a pair of a public key and a signature
+-- that can be verified with that public key of a message derived from
+-- the subject, property name, and property value being attested to.
+--
+-- In particular, the message is hash(hash(subject) + hash (property_name) + hash(property_value))
+data AttestationSignature = AttestationSignature
+    { _attestationSignature_publicKey :: VerKeyDSIGN Ed25519DSIGN
+    , _attestationSignature_signature :: SigDSIGN Ed25519DSIGN
+    } deriving Show
+
+instance ToJSON AttestationSignature where
+    toJSON a = Aeson.object
+        [ "publicKey" .=
+            B8.unpack (B16.encode $ rawSerialiseVerKeyDSIGN (_attestationSignature_publicKey a))
+        , "signature" .=
+            B8.unpack (B16.encode $ rawSerialiseSigDSIGN (_attestationSignature_signature a))
+        ]
+
+parseAnnotatedSignature
+    :: DSIGNAlgorithm v
+    => (VerKeyDSIGN v -> SigDSIGN v -> x)
+    -> Aeson.Object
+    -> Aeson.Parser x
+parseAnnotatedSignature f o = do
+    publicKeyField <- o .: "publicKey"
+    signatureField <- o .: "signature"
+    publicKey <- flip (Aeson.withText "publicKey") publicKeyField $ \t ->
+        maybe (fail $ T.unpack $ "Couldn't parse verification key: " <> t) pure $
+            rawDeserialiseVerKeyDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
+    signature <- flip (Aeson.withText "signature") signatureField $ \t ->
+        maybe (fail $ T.unpack $ "Couldn't parse signature " <> t) pure $
+            rawDeserialiseSigDSIGN =<< eitherToMaybe (B16.decode $ T.encodeUtf8 t)
+    AesonHelpers.noOtherFields "annotated signature" o ["publicKey", "signature"]
+    pure $ f publicKey signature
+  where
+    eitherToMaybe :: Either a b -> Maybe b
+    eitherToMaybe = either (const Nothing) Just
+
+newtype SequenceNumber = SequenceNumber Int
+    deriving stock (Eq, Show, Read, Ord)
+    deriving newtype (Num, Enum, Real, Integral, ToJSON)
+
+hashSequenceNumber
+    :: SequenceNumber
+    -> Hash Blake2b_256 SequenceNumber
+hashSequenceNumber =
+    hashWith (CBOR.toStrictByteString . CBOR.encodeWord . fromIntegral)
+
+
+--
+-- Signing
+--
+
+data SomeSigningKey where
+    SomeSigningKey
+        :: forall keyrole. (MakeAttestationSignature keyrole)
+        => SigningKey keyrole
+        -> SomeSigningKey
+
+-- | Hashes required to produce a message for attestation purposes
+data HashesForAttestation = HashesForAttestation
+    { _hashesForAttestation_subject :: Hash Blake2b_256 Subject
+    , _hashesForAttestation_property :: Hash Blake2b_256 Property
+    , _hashesForAttestation_value :: Hash Blake2b_256 Value
+    , _hashesForAttestation_sequence_number :: Hash Blake2b_256 SequenceNumber
+    }
+
+class MakeAttestationSignature keyrole where
+    makeAttestationSignature
+        :: SigningKey keyrole
+        -> HashesForAttestation
+        -> AttestationSignature
+
+instance MakeAttestationSignature PaymentKey where
+    makeAttestationSignature key hashes =
+        AttestationSignature
+            { _attestationSignature_publicKey =
+                deriveVerKeyDSIGN prv
+            , _attestationSignature_signature = signDSIGN ()
+                (hashToBytes $ attestationDigest hashes)
+                prv
+            }
+      where
+        -- Very ugly cast of a 'PaymentKey' into a SignKeyDSign
+        Just prv = rawDeserialiseSignKeyDSIGN (serialiseToRawBytes key)
+
+instance MakeAttestationSignature PaymentExtendedKey where
+    makeAttestationSignature key hashes =
+        AttestationSignature
+            { _attestationSignature_publicKey = unsafeToVerKeyDSign
+                $ CC.toXPub xprv
+            , _attestationSignature_signature = unsafeToSigDSign
+                $ CC.sign (mempty :: ByteString) xprv (hashToBytes $ attestationDigest hashes)
+            }
+      where
+        -- Very ugly cast of a 'PaymentExtendedKey' into an 'XPrv'
+        Right xprv = CC.xprv (serialiseToRawBytes key)
+        -- NOTE: We can 'safely' cast to VerKeyDSIGN and SigDSIGN for
+        -- verification because the signature verification algorithm is the
+        -- same for extended and normal keys.
+        unsafeToVerKeyDSign = fromJust . rawDeserialiseVerKeyDSIGN . CC.xpubPublicKey
+        unsafeToSigDSign = fromJust . rawDeserialiseSigDSIGN . CC.unXSignature
+
+hashesForAttestation
+   :: forall p. WellKnownProperty p
+   => Subject
+   -> p
+   -> SequenceNumber
+   -> HashesForAttestation
+hashesForAttestation s w n = HashesForAttestation
+    { _hashesForAttestation_subject =
+        hashSubject s
+    , _hashesForAttestation_property =
+        hashProperty (wellKnownPropertyName (Proxy @p))
+    , _hashesForAttestation_value =
+        hashWellKnownProperty w
+    , _hashesForAttestation_sequence_number =
+        hashSequenceNumber n
+    }
+
+attestationDigest
+    :: HashesForAttestation
+    -> Hash Blake2b_256 HashesForAttestation
+attestationDigest hashes = castHash $ hashWith id $ mconcat
+    [ hashToBytes $ _hashesForAttestation_subject hashes
+    , hashToBytes $ _hashesForAttestation_property hashes
+    , hashToBytes $ _hashesForAttestation_value hashes
+    , hashToBytes $ _hashesForAttestation_sequence_number hashes
+    ]
