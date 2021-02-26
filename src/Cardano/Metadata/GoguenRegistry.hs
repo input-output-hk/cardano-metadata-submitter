@@ -30,6 +30,7 @@ import Cardano.Metadata.Types
     , Policy (..)
     , Property (..)
     , PropertyValue (..)
+    , SequenceNumber (..)
     , Subject (..)
     , Ticker (..)
     , Unit (..)
@@ -37,12 +38,9 @@ import Cardano.Metadata.Types
     , WellKnown (..)
     , WellKnownProperty (..)
     , hashPolicy
-    , hashesForAttestation
     , parseUnit
     , propertyValueFromString
     , propertyValueToString
-    , verifyAttested
-    , withWellKnown
     )
 import Control.Monad.Fail
     ( fail )
@@ -204,9 +202,11 @@ parseWithAttestation parseValue = Aeson.withObject "property with attestation" $
     value <- parseValue =<< o .: "value"
     attestations <- (o .: "anSignatures" >>=) $ Aeson.withArray "Annotated Signatures" $
         fmap toList . mapM (Aeson.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
+    sequenceNumber <- SequenceNumber <$> o .: "sequence_number"
     pure $ Attested
         { _attested_signatures = attestations
         , _attested_property = value
+        , _attested_sequence_number = sequenceNumber
         }
 
 parseAnnotatedSignature
@@ -237,17 +237,6 @@ verifyPolicy policy (Subject subject) = do
         , "Expected: " <> T.take 56 subject
         , "Got: " <> policyId
         ]
-
-verifyAttestations
-    :: CompleteGoguenRegistryEntry
-    -> Either [AttestationSignature] ()
-verifyAttestations entry = do
-    let Identity subject = _goguenRegistryEntry_subject entry
-    let Identity name = _goguenRegistryEntry_name entry
-    let Identity description = _goguenRegistryEntry_description entry
-    _ <- verifyAttested $ fmap (`withWellKnown` (hashesForAttestation subject)) name
-    _ <- verifyAttested $ fmap (`withWellKnown` (hashesForAttestation subject)) description
-    pure ()
 
 -- FIXME: Replace this with generics...
 serializeRegistryEntry
@@ -293,6 +282,7 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
     attested prettyValue a = encloseObj
         [ objField "value" (prettyValue (_attested_property a))
         , objField "anSignatures" $ encloseList $
+        , objField "sequence_number" (PP.pretty (toInteger $ _attested_sequence_number a))
             attestation <$> _attested_signatures a
         ]
     attestation s = encloseObj

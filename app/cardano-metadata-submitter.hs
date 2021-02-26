@@ -210,8 +210,10 @@ combineRegistryEntries new old = GoguenRegistryEntry
     }
   where
     combineAttestedEntry a b = case (a, b) of
-        (Just (Attested sigA valA), Just (Attested sigB valB)) | raw valA == raw valB ->
-            Just $ Attested (sigA ++ sigB) valA
+        (Just (Attested sigA nA valA), Just (Attested sigB nB valB)) | raw valA == raw valB ->
+            Just $ Attested (sigA ++ sigB) (max nA nB) valA
+        (Just (Attested sigs nA val), Just (Attested _ nB _)) ->
+            Just $ Attested sigs (max nA nB + 1) val
         _ ->
             a <|> b
     raw (WellKnown (PropertyValue r _) _) = r
@@ -246,10 +248,10 @@ attestFields (SomeSigningKey someSigningKey) props old = do
         -> Subject
         -> Attested (WellKnown p)
         -> Attested (WellKnown p)
-    attestField fld subj orig@(Attested att wk) =
+    attestField fld subj orig@(Attested att n wk) =
         if fld `elem` props
-        then Attested attestations wk
-        else Attested att wk
+        then Attested attestations n wk
+        else Attested att n wk
       where
         wkHash = extractAttestationHashes subj orig
         newAttestationSig = makeAttestationSignature someSigningKey wkHash
@@ -260,8 +262,8 @@ extractAttestationHashes
     => Subject
     -> Attested (WellKnown p)
     -> HashesForAttestation
-extractAttestationHashes subj (Attested _ (WellKnown raw structured)) =
-    hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw
+extractAttestationHashes subj (Attested _ n (WellKnown raw structured)) =
+    hashesForAttestation subj (wellKnownPropertyName (Identity structured)) raw n
 
 verifyEverything
     :: SlotNo
@@ -280,9 +282,9 @@ verifyEverything atSlot record = do
     -- 3. Verify that all attestations have matching signatures
     let verifyLocalAttestations fieldName field = do
             let hashes = extractAttestationHashes subject field
-            let (Attested attestations _) = field
+            let (Attested attestations n _) = field
             left (const $ "attestation verification failed for: " <> fieldName) $ do
-                verifyAttested $ Attested attestations hashes
+                verifyAttested $ Attested attestations n hashes
             left (const $ "policy evaluation failed for: " <> fieldName) $ do
                 evaluatePolicy policy atSlot attestations
 

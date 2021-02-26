@@ -1,7 +1,9 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeApplications #-}
@@ -23,6 +25,7 @@ module Cardano.Metadata.Types
     , AttestationSignature (..)
     , MakeAttestationSignature(..)
     , SomeSigningKey (..)
+    , SequenceNumber (..)
     , HashesForAttestation (..)
     , hashesForAttestation
     , attestationDigest
@@ -105,6 +108,8 @@ import Shelley.Spec.Ledger.Keys
 import qualified AesonHelpers
 import qualified Cardano.Api as Api
 import qualified Cardano.Crypto.Wallet as CC
+import qualified Codec.CBOR.Encoding as CBOR
+import qualified Codec.CBOR.Write as CBOR
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
 import qualified Data.ByteString.Base16 as B16
@@ -220,17 +225,20 @@ data HashesForAttestation = HashesForAttestation
     { _hashesForAttestation_subject :: Hash Blake2b_256 Subject
     , _hashesForAttestation_property :: Hash Blake2b_256 Property
     , _hashesForAttestation_value :: Hash Blake2b_256 PropertyValue
+    , _hashesForAttestation_sequence_number :: Hash Blake2b_256 SequenceNumber
     }
 
 hashesForAttestation
- :: Subject
- -> Property
- -> PropertyValue
- -> HashesForAttestation
-hashesForAttestation s p v = HashesForAttestation
+   :: Subject
+   -> Property
+   -> PropertyValue
+   -> SequenceNumber
+   -> HashesForAttestation
+hashesForAttestation s p v n = HashesForAttestation
     { _hashesForAttestation_subject = hashSubject s
     , _hashesForAttestation_property = hashProperty p
     , _hashesForAttestation_value = hashPropertyValue v
+    , _hashesForAttestation_sequence_number = hashSequenceNumber n
     }
 
 attestationDigest
@@ -240,20 +248,33 @@ attestationDigest hashes = castHash $ hashWith id $ mconcat
     [ hashToBytes $ _hashesForAttestation_subject hashes
     , hashToBytes $ _hashesForAttestation_property hashes
     , hashToBytes $ _hashesForAttestation_value hashes
+    , hashToBytes $ _hashesForAttestation_sequence_number hashes
     ]
 
 -- | Metadata entries can be provided along with annotated signatures
 -- attesting to the validity of those entry values.
 data Attested a = Attested
     { _attested_signatures :: [AttestationSignature]
+    , _attested_sequence_number :: SequenceNumber
     , _attested_property :: a
     } deriving (Functor, Show)
+
+newtype SequenceNumber = SequenceNumber Int
+    deriving stock (Eq, Show, Read, Ord)
+    deriving newtype (Num, Enum, Real, Integral)
+
+hashSequenceNumber
+    :: SequenceNumber
+    -> Hash Blake2b_256 SequenceNumber
+hashSequenceNumber =
+    hashWith (CBOR.toStrictByteString . CBOR.encodeWord . fromIntegral)
 
 emptyAttested
     :: a
     -> Attested a
 emptyAttested a = Attested
     { _attested_signatures = []
+    , _attested_sequence_number = 0
     , _attested_property = a
     }
 
