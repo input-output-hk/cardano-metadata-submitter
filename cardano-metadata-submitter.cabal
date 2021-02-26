@@ -53,8 +53,6 @@ executable cardano-metadata-submitter
                      , aeson
                      , base64-bytestring
                      , bytestring
-                     , cardano-crypto-class
-                     , cardano-binary
                      , cardano-prelude
                      , cardano-metadata-submitter
                      , directory
@@ -62,7 +60,6 @@ executable cardano-metadata-submitter
                      , text
                      , cardano-api
                      , cardano-cli
-                     , cardano-crypto
                      , time
                      , cardano-slotting
   hs-source-dirs:      app

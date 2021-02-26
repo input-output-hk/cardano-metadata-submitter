@@ -41,7 +41,8 @@
   - {name: [Data.List], as: L}
   - {name: [Data.Map.Strict], as: Map}
   - {name: [Data.Sequence], as: Seq}
-  - {name: [Data.Set, Data.HashSet], as: Set}
+  - {name: [Data.Set], as: Set}
+  - {name: [Data.HashSet], as: HSet}
   - {name: [Data.Text, Data.Text.Encoding], as: T}
   - {name: [Data.Vector], as: V}
 

@@ -87,50 +87,12 @@ deriving instance
     , Show (f (Attested (WellKnown Ticker)))
     ) => Show (GoguenRegistryEntry f)
 
-type CompleteGoguenRegistryEntry = GoguenRegistryEntry Identity
 type PartialGoguenRegistryEntry = GoguenRegistryEntry Maybe
-
-completeToPartialRegistryEntry
-    :: CompleteGoguenRegistryEntry
-    -> PartialGoguenRegistryEntry
-completeToPartialRegistryEntry e = GoguenRegistryEntry
-    { _goguenRegistryEntry_subject =
-        Just $ runIdentity $ _goguenRegistryEntry_subject e
-    , _goguenRegistryEntry_policy =
-        Just $ runIdentity $ _goguenRegistryEntry_policy e
-    , _goguenRegistryEntry_name =
-        Just $ runIdentity $ _goguenRegistryEntry_name e
-    , _goguenRegistryEntry_description =
-        Just $ runIdentity $ _goguenRegistryEntry_description e
-    , _goguenRegistryEntry_logo =
-        Just $ runIdentity $ _goguenRegistryEntry_logo e
-    , _goguenRegistryEntry_url =
-        Just $ runIdentity $ _goguenRegistryEntry_url e
-    , _goguenRegistryEntry_unit =
-        Just $ runIdentity $ _goguenRegistryEntry_unit e
-    , _goguenRegistryEntry_ticker =
-        Just $ runIdentity $ _goguenRegistryEntry_ticker e
-    }
-
-partialToCompleteRegistryEntry
-    :: PartialGoguenRegistryEntry
-    -> Maybe CompleteGoguenRegistryEntry
-partialToCompleteRegistryEntry e = GoguenRegistryEntry
-    <$> fmap Identity (_goguenRegistryEntry_subject e)
-    <*> fmap Identity (_goguenRegistryEntry_policy e)
-    <*> fmap Identity (_goguenRegistryEntry_name e)
-    <*> fmap Identity (_goguenRegistryEntry_description e)
-    <*> fmap Identity (_goguenRegistryEntry_logo e)
-    <*> fmap Identity (_goguenRegistryEntry_url e)
-    <*> fmap Identity (_goguenRegistryEntry_unit e)
-    <*> fmap Identity (_goguenRegistryEntry_ticker e)
 
 parseRegistryEntry
     :: Aeson.Value
     -> Aeson.Parser PartialGoguenRegistryEntry
 parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
-    -- FIXME: Have proper parser for subject and policy. We expect both to be
-    -- hex-encoded strings.
     subject <- o .:? "subject"
 
     policyRaw <- o .:? unProperty (wellKnownPropertyName $ Proxy @Policy)

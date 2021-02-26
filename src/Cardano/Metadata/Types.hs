@@ -37,8 +37,6 @@ module Cardano.Metadata.Types
     , verifyAttested
     , WellKnownProperty (..)
     , WellKnown (..)
-    , parseWellKnown'
-    , withWellKnown
     , Name (..)
     , Description (..)
     , Logo (..)
@@ -391,27 +389,6 @@ data WellKnown p where
         } -> WellKnown p
 
 deriving instance Show p => Show (WellKnown p)
-
-parseWellKnown'
-    :: WellKnownProperty p
-    => Aeson.Value
-    -> Aeson.Parser (WellKnown p)
-parseWellKnown' =
-    let
-        parse t =
-            case propertyValueFromString t of
-                Left err -> fail (T.unpack err)
-                Right v -> WellKnown v <$> parseWellKnown v
-     in
-        Aeson.withText "property value" parse
-
-withWellKnown
-    :: WellKnownProperty p
-    => WellKnown p
-    -> (Property -> PropertyValue -> x)
-    -> x
-withWellKnown p f =
-    f (wellKnownPropertyName p) (_wellKnown_raw p)
 
 -- | "name" is a well-known property whose value must be a string
 newtype Name = Name { unName :: Text }
