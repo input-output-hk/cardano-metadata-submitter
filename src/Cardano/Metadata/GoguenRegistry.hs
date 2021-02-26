@@ -200,7 +200,7 @@ parseWithAttestation
     -> Aeson.Parser (Attested a)
 parseWithAttestation parseValue = Aeson.withObject "property with attestation" $ \o -> do
     value <- parseValue =<< o .: "value"
-    attestations <- (o .: "anSignatures" >>=) $ Aeson.withArray "Annotated Signatures" $
+    attestations <- (o .: "signatures" >>=) $ Aeson.withArray "Annotated Signatures" $
         fmap toList . mapM (Aeson.withObject "Attestation" (parseAnnotatedSignature AttestationSignature))
     sequenceNumber <- SequenceNumber <$> o .: "sequence_number"
     pure $ Attested
@@ -281,8 +281,8 @@ serializeRegistryEntry entry = encloseObj $ catMaybes
       ]
     attested prettyValue a = encloseObj
         [ objField "value" (prettyValue (_attested_property a))
-        , objField "anSignatures" $ encloseList $
         , objField "sequence_number" (PP.pretty (toInteger $ _attested_sequence_number a))
+        , objField "signatures" $ encloseList $
             attestation <$> _attested_signatures a
         ]
     attestation s = encloseObj
