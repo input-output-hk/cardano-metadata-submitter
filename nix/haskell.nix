@@ -41,7 +41,7 @@ let
       # Add dependencies
       {
         packages.cardano-metadata-submitter = {
-          components.tests.unit.build-tools = [ ];
+          # components.tests.unit.build-tools = [ ];
 
           # How to set environment variables for builds
           #preBuild = "export NETWORK=testnet";
