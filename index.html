@@ -1,0 +1,16 @@
+<!doctype html>
+<body>
+  <img id="preview" />
+  <script>
+  function parseQuery(q) {
+    return q
+      .replace('?', '')
+      .split('&')
+      .map(x => x.split('='))
+      .reduce((o, [k,v]) => Object.assign(o, { [k]: v }), {});
+  }
+
+  const data = parseQuery(window.location.search)["data"];
+  document.querySelector("img#preview").setAttribute("src", `data:image/png;base64,${data}`);
+  </script>
+</body>
