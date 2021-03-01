@@ -105,7 +105,6 @@ source-repository-package
     plugins/backend-monitoring
     plugins/backend-trace-forwarder
     tracer-transformers
-    plugins/scribe-systemd
 
 source-repository-package
   type: git
@@ -131,7 +130,6 @@ constraints:
   brick >= 0.47,
   hedgehog >= 1.0,
   ip < 1.5,
-  libsystemd-journal >= 1.4.4,
   network >= 3.1.1.0
 
 allow-newer: katip:Win32
