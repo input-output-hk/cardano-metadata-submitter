@@ -30,8 +30,19 @@ let
     # the Haskell.nix package set, reduced to local packages.
     (selectProjectPackages cardanoMetadataSubmitterPackages);
 
+  haskellPackagesMusl64 = recRecurseIntoAttrs
+    # the Haskell.nix package set, reduced to local packages.
+    (selectProjectPackages pkgs.pkgsCross.musl64.cardanoMetadataSubmitterPackages);
+
+  metadataSubmitterTarball = pkgs.runCommandNoCC "metadata-submitter-tarball" { buildInputs = [ pkgs.gnutar gzip ]; } ''
+    cp ${haskellPackagesMusl64.cardano-metadata-submitter.components.exes.cardano-metadata-submitter}/bin/cardano-metadata-submitter ./
+    mkdir -p $out/nix-support
+    tar -czvf $out/cardano-metadata-submitter.tar.gz cardano-metadata-submitter
+    echo "file binary-dist $out/cardano-metadata-submitter.tar.gz" > $out/nix-support/hydra-build-products
+  '';
+
   self = {
-    inherit haskellPackages check-hydra;
+    inherit haskellPackages check-hydra metadataSubmitterTarball;
 
     inherit (haskellPackages.cardano-metadata-submitter.identifier) version;
     # Grab the executable component of our package.
