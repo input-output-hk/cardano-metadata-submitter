@@ -102,8 +102,6 @@ import Data.Aeson
     ( FromJSON (..), ToJSON (..), (.:), (.=) )
 import Data.Maybe
     ( fromJust )
-import Data.Text
-    ( Text )
 import Data.Text.Read
     ( decimal )
 import Network.URI
@@ -190,8 +188,6 @@ prettyPolicy = \case
         show $ ppTimelock $ toAllegraTimelock s
     Policy _ (ScriptInEra _ (SimpleScript SimpleScriptV2 s)) ->
         show $ ppTimelock $ toAllegraTimelock s
-    Policy _ (ScriptInEra _ (PlutusScript _ _)) ->
-        panic "impossible"
 
 hashPolicy :: Policy -> ScriptHash
 hashPolicy (Policy _ (ScriptInEra _ script)) =
@@ -220,8 +216,6 @@ evaluatePolicy (Policy _ script) atSlot sigs =
             evaluateAtSlot $ toAllegraTimelock s
         ScriptInEra _ (SimpleScript SimpleScriptV2 s) ->
             evaluateAtSlot $ toAllegraTimelock s
-        ScriptInEra _ (PlutusScript _ _) ->
-            panic "impossible"
   where
     evaluateAtSlot :: Timelock StandardCrypto -> Either Text ()
     evaluateAtSlot s

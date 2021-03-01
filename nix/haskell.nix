@@ -12,7 +12,7 @@
 
 , config ? {}
 # GHC attribute name
-, compiler ? config.haskellNix.compiler or "ghc865"
+, compiler ? config.haskellNix.compiler or "ghc8102"
 # Enable profiling
 , profiling ? config.haskellNix.profiling or false
 }:
@@ -41,7 +41,7 @@ let
       # Add dependencies
       {
         packages.cardano-metadata-submitter = {
-          components.tests.unit.build-tools = [ ];
+          # components.tests.unit.build-tools = [ ];
 
           # How to set environment variables for builds
           #preBuild = "export NETWORK=testnet";
