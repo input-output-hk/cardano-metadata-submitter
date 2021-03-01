@@ -56,6 +56,7 @@ let
       collectTests jobs.native.benchmarks ++
       # TODO: Add your project executables to this list
       [ jobs.native.cardano-metadata-submitter.x86_64-linux
+        jobs.native.metadataSubmitterTarball.x86_64-linux
       ]
     ))
   # Build the shell derivation in Hydra so that all its dependencies
