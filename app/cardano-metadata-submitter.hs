@@ -11,10 +11,13 @@ import Cardano.CLI.Shelley.Key
     ( readSigningKeyFile )
 import Cardano.CLI.Types
     ( SigningKeyFile (..) )
+import Cardano.Metadata.CurrentSlot
+    ( getCurrentSlot, mainnetSlotParameters, testnetSlotParameters )
 import Cardano.Metadata.GoguenRegistry
     ( GoguenRegistryEntry (..)
     , PartialGoguenRegistryEntry
     , parseRegistryEntry
+    , validateEntry
     )
 import Cardano.Metadata.Types
     ( Attested (..)
@@ -23,20 +26,12 @@ import Cardano.Metadata.Types
     , Subject (..)
     , WellKnownProperty (..)
     , emptyAttested
-    , evaluatePolicy
     , hashesForAttestation
-    , prettyPolicy
-    , verifyAttested
-    , verifyPolicy
     )
-import Cardano.Slotting.Slot
-    ( SlotNo (..) )
 import Control.Arrow
     ( left )
 import Data.List
     ( isSuffixOf )
-import Data.Time
-    ( NominalDiffTime, UTCTime, diffUTCTime, getCurrentTime )
 import Prelude
     ( String )
 import System.Directory
@@ -53,7 +48,6 @@ import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
 import qualified Options.Applicative as OA
-import qualified Prelude
 
 main :: IO ()
 main = do
@@ -254,61 +248,6 @@ attestFields (SomeSigningKey someSigningKey) props old = do
         newAttestationSig = makeAttestationSignature someSigningKey wkHash
         attestations = newAttestationSig:att
 
-verifyEverything
-    :: SlotNo
-    -> PartialGoguenRegistryEntry
-    -> Either Text ()
-verifyEverything atSlot record = do
-    -- 1. Verify that mandatory fields are present
-    subject <- verifyField _goguenRegistryEntry_subject
-    policy  <- verifyField _goguenRegistryEntry_policy
-    name    <- verifyField _goguenRegistryEntry_name
-    desc    <- verifyField _goguenRegistryEntry_description
-
-    -- 2. Policy should re-hash to first bytes of the subject
-    verifyPolicy policy subject
-
-    -- 3. Verify that all attestations have matching signatures
-    let verifyLocalAttestations fieldName (Attested attestations n w) = do
-            let hashes = hashesForAttestation subject w n
-            left (const $ "attestation verification failed for: " <> fieldName) $ do
-                verifyAttested $ Attested attestations n hashes
-            let policyEvaluationFailed = unlines
-                    [ "policy evaluation failed for: " <> fieldName
-                    , "Policy is:"
-                    , prettyPolicy policy
-                    ]
-            left (const policyEvaluationFailed) $
-                evaluatePolicy policy atSlot attestations
-
-    verifyLocalAttestations "name" name
-    verifyLocalAttestations "description" desc
-
-    forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "logo"
-    forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "url"
-    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "unit"
-    forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "ticker"
-  where
-    verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either Text a
-    verifyField field = maybe (Left missingFields) Right (field record)
-
-    missingFields :: Text
-    missingFields = mconcat
-        [ missingField "Missing field subject"
-            _goguenRegistryEntry_subject
-        , missingField "Missing field policy: Use -p to speciy"
-            _goguenRegistryEntry_policy
-        , missingField "Missing field name: Use -n to specify"
-            _goguenRegistryEntry_name
-        , missingField "Missing field description: Use -d to specify"
-            _goguenRegistryEntry_description
-        ]
-
-    missingField :: Text -> (PartialGoguenRegistryEntry -> Maybe b) -> Text
-    missingField str fld = case fld record of
-        Just _  -> ""
-        Nothing -> "\n" <> str
-
 handleEntryUpdateArguments :: EntryUpdateArguments -> IO ()
 handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInfo logoM policyM) = do
     attestKey <- mapM readKeyFile keyfile
@@ -363,9 +302,11 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInf
 
     -- FIXME: Allow users to specify a different start time and/or slot
     -- NOTE: Only useful for validating scripts which contains timelocks.
-    slot <- getCurrentSlot mainnetShelleyStartTime mainnetShelleyStartSlot mainnetShelleySlotLength
+    slot <- lookupEnv "CARDANO_TESTNET" >>= \case
+        Just{}  -> getCurrentSlot testnetSlotParameters
+        Nothing -> getCurrentSlot mainnetSlotParameters
 
-    let finalVerificationStatus = verifyEverything slot newRecordWithAttestations
+    let finalVerificationStatus = validateEntry slot newRecordWithAttestations
 
     BL8.writeFile (draftFilename fInfo) (Aeson.encodePretty newRecordWithAttestations)
     case _FileInfoDraftStatus fInfo of
@@ -405,22 +346,3 @@ argumentParser :: Maybe Subject -> OA.Parser Arguments
 argumentParser defaultSubject = asum
     [ ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject
     ]
-
-getCurrentSlot :: UTCTime -> SlotNo -> NominalDiffTime -> IO SlotNo
-getCurrentSlot startTime (SlotNo startSlot) slotLength = do
-    now <- getCurrentTime
-    let delta = nominalDiffTimeToSeconds $ now `diffUTCTime` startTime
-    let slotsSinceShelley = fromIntegral $ delta `div` round slotLength
-    pure $ SlotNo $ slotsSinceShelley + startSlot
-  where
-    nominalDiffTimeToSeconds :: NominalDiffTime -> Integer
-    nominalDiffTimeToSeconds = round
-
-mainnetShelleyStartTime :: UTCTime
-mainnetShelleyStartTime = Prelude.read "2020-07-29 21:44:51 UTC"
-
-mainnetShelleyStartSlot :: SlotNo
-mainnetShelleyStartSlot = SlotNo 4492800
-
-mainnetShelleySlotLength :: NominalDiffTime
-mainnetShelleySlotLength = 1

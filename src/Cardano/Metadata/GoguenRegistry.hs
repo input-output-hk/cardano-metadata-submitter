@@ -23,8 +23,17 @@ import Cardano.Metadata.Types
     , Unit (..)
     , Url (..)
     , WellKnownProperty (..)
+    , evaluatePolicy
+    , hashesForAttestation
     , parseWithAttestation
+    , prettyPolicy
+    , verifyAttested
+    , verifyPolicy
     )
+import Cardano.Slotting.Slot
+    ( SlotNo (..) )
+import Control.Arrow
+    ( left )
 import Data.Aeson
     ( ToJSON (..), (.:?), (.=) )
 
@@ -118,3 +127,59 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
         , _goguenRegistryEntry_unit = unitAnn
         , _goguenRegistryEntry_ticker = tickerAnn
         }
+
+validateEntry
+    :: SlotNo
+    -> PartialGoguenRegistryEntry
+    -> Either Text ()
+validateEntry atSlot record = do
+    -- 1. Verify that mandatory fields are present
+    subject <- verifyField _goguenRegistryEntry_subject
+    policy  <- verifyField _goguenRegistryEntry_policy
+    name    <- verifyField _goguenRegistryEntry_name
+    desc    <- verifyField _goguenRegistryEntry_description
+
+    -- 2. Policy should re-hash to first bytes of the subject
+    verifyPolicy policy subject
+
+    -- 3. Verify that all attestations have matching signatures
+    let verifyLocalAttestations :: WellKnownProperty p => Text -> Attested p -> Either Text ()
+        verifyLocalAttestations fieldName (Attested attestations n w) = do
+            let hashes = hashesForAttestation subject w n
+            left (const $ "attestation verification failed for: " <> fieldName) $ do
+                verifyAttested $ Attested attestations n hashes
+            let policyEvaluationFailed = unlines
+                    [ "policy evaluation failed for: " <> fieldName
+                    , "Policy is:"
+                    , prettyPolicy policy
+                    ]
+            left (const policyEvaluationFailed) $
+                evaluatePolicy policy atSlot attestations
+
+    verifyLocalAttestations "name" name
+    verifyLocalAttestations "description" desc
+
+    forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "logo"
+    forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "url"
+    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "unit"
+    forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "ticker"
+  where
+    verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either Text a
+    verifyField field = maybe (Left missingFields) Right (field record)
+
+    missingFields :: Text
+    missingFields = mconcat
+        [ missingField "Missing field subject"
+            _goguenRegistryEntry_subject
+        , missingField "Missing field policy: Use -p to speciy"
+            _goguenRegistryEntry_policy
+        , missingField "Missing field name: Use -n to specify"
+            _goguenRegistryEntry_name
+        , missingField "Missing field description: Use -d to specify"
+            _goguenRegistryEntry_description
+        ]
+
+    missingField :: Text -> (PartialGoguenRegistryEntry -> Maybe b) -> Text
+    missingField str fld = case fld record of
+        Just _  -> ""
+        Nothing -> "\n" <> str
