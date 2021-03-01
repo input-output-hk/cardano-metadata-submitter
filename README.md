@@ -11,6 +11,8 @@ The instruction below supposes that users have already been through the process 
 To create a new entry, you must first obtain your metadata subject. The subject is defined as the concatenation of the base16-encoded `policyId` and base16-encoded `assetName` of your asset. In case
 your `assetName` is empty, then the `policyId` is your subject. We'll consider the following policy for this tutorial:
 
+<p align="right"><strong>policy.json</strong></p>
+
 ```json
 {
     "type": "all",
@@ -22,7 +24,6 @@ your `assetName` is empty, then the `policyId` is your subject. We'll consider t
     ]
 }
 ```
-<p align="right"><strong>policy.json</strong></p>
 
 
 From there, initialize a new submission using `--init` as follows:
@@ -82,14 +83,22 @@ verification is done. It is therefore possible for a previously valid metadata t
 
 To attest all metadata at once, simple provide a signing key file (bech32, hexadecimal or cardano-cli's text envelope): 
 
-> Alternatively, you can provide attestation for specific fields by using the upper-cased version of the command associated with that field, or by adding the `attest-` 
-prefix to each long command (e.g. `-N` or `--attest-name` for `name`, `-T` or `--attest-ticker` for `ticker).
-
 ```console
 cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk
 ```
 
 The policy from this example is quite straightforward and simply requires all signatures from a single key. So a single attestation of that key for each metadata item is sufficient.
+
+> **Alternatively**, you can provide attestation for specific fields by using the upper-cased version of the command associated with that field, or by adding the `attest-` 
+prefix to each long command (e.g. `-N` or `--attest-name` for `name`, `-T` or `--attest-ticker` for `ticker). Note that these are flags and don't take any argument. 
+>
+> For example, if you want to only attest for the name and the ticker, you can run the following:
+>
+> ```console
+> cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk \
+>     --attest-name \
+>     --attest-ticker 
+> ```
 
 ### Finalize submission
 
