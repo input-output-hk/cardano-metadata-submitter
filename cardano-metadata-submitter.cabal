@@ -19,7 +19,7 @@ library
   exposed-modules: Cardano.Metadata.Types
                  , Cardano.Metadata.GoguenRegistry
   other-modules: AesonHelpers
-  build-depends: base ^>=4.12.0.0
+  build-depends: base
                , aeson
                , base16-bytestring
                , base64-bytestring
@@ -47,7 +47,7 @@ library
 
 executable cardano-metadata-submitter
   main-is:             cardano-metadata-submitter.hs
-  build-depends:       base ^>=4.12.0.0
+  build-depends:       base
                      , aeson
                      , aeson-pretty
                      , base64-bytestring
