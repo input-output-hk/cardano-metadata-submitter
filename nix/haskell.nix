@@ -18,10 +18,21 @@
 }:
 
 let
+  src = haskell-nix.haskellLib.cleanGit {
+    name = "cardano-metadata-submitter";
+    src = ../.;
+  };
+
+  projectPackages = lib.attrNames (haskell-nix.haskellLib.selectProjectPackages
+    (haskell-nix.cabalProject {
+      inherit src;
+      compiler-nix-name = compiler;
+    }));
+
   # This creates the Haskell package set.
   # https://input-output-hk.github.io/haskell.nix/user-guide/projects/
   pkgSet = haskell-nix.cabalProject  {
-    src = haskell-nix.haskellLib.cleanGit { src = ../.; name = "cardano-metadata-submitter"; };
+    inherit src;
     compiler-nix-name = compiler;
 
     # these extras will provide additional packages
@@ -102,6 +113,33 @@ let
         # Make sure we use a buildPackages version of happy
         packages.pretty-show.components.library.build-tools = [ buildPackages.haskell-nix.haskellPackages.happy ];
 
+        # Remove hsc2hs build-tool dependencies (suitable version will be available as part of the ghc derivation)
+        packages.Win32.components.library.build-tools = lib.mkForce [];
+        packages.terminal-size.components.library.build-tools = lib.mkForce [];
+        packages.network.components.library.build-tools = lib.mkForce [];
+      })
+      ({ pkgs, ... }: lib.mkIf pkgs.stdenv.hostPlatform.isLinux {
+        # systemd can't be statically linked
+        packages.cardano-config.flags.systemd = !pkgs.stdenv.hostPlatform.isMusl;
+        packages.cardano-node.flags.systemd = !pkgs.stdenv.hostPlatform.isMusl;
+      })
+      # Musl libc fully static build
+      (lib.optionalAttrs stdenv.hostPlatform.isMusl (let
+        # Module options which adds GHC flags and libraries for a fully static build
+        fullyStaticOptions = {
+          enableShared = false;
+          enableStatic = true;
+        };
+      in
+        {
+          packages = lib.genAttrs projectPackages (name: fullyStaticOptions);
+
+          # Haddock not working and not needed for cross builds
+          doHaddock = false;
+        }
+      ))
+
+      ({ pkgs, ... }: lib.mkIf (pkgs.stdenv.hostPlatform != pkgs.stdenv.buildPlatform) {
         # Remove hsc2hs build-tool dependencies (suitable version will be available as part of the ghc derivation)
         packages.Win32.components.library.build-tools = lib.mkForce [];
         packages.terminal-size.components.library.build-tools = lib.mkForce [];

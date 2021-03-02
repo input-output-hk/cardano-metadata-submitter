@@ -1,9 +1,18 @@
 {-# LANGUAGE ApplicativeDo #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
-import Cardano.Prelude
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+
+import Cardano.Prelude hiding
+    ( log )
 
 import Cardano.Api
     ( AsType (AsPaymentExtendedKey, AsPaymentKey) )
@@ -26,16 +35,53 @@ import Cardano.Metadata.Types
     , emptyAttested
     , hashesForAttestation
     )
+import Colog
+    ( pattern E
+    , pattern I
+    , LogAction
+    , Message
+    , Severity
+    , WithLog
+    , cmap
+    , filterBySeverity
+    , fmtMessage
+    , log
+    , logTextStdout
+    , msgSeverity
+    , usingLoggerT
+    )
 import Control.Arrow
     ( left )
-import Data.List
-    ( isSuffixOf )
-import Prelude
-    ( String )
+import Control.Exception.Safe
+    ( handleAny )
+import Data.Validation
 import System.Directory
     ( doesFileExist, renameFile )
 import System.Environment
     ( lookupEnv )
+import System.IO
+    ( hFileSize )
+
+import Cardano.Metadata.Types.Common
+    ( File (File) )
+import Cardano.Metadata.Validation.Rules
+    ( apply, prettyPrintValidationError )
+import Cardano.Metadata.Validation.Types
+    ( Difference (Added, Changed), Metadata )
+import Cardano.Metadata.Validation.Wallet
+    ( prettyPrintWalletValidationError, walletValidationRules )
+
+import Config
+    ( Arguments (ArgumentsEntryUpdate, ArgumentsValidate)
+    , AttestationField (AttestationFieldDescription, AttestationFieldLogo, AttestationFieldName, AttestationFieldTicker, AttestationFieldUrl)
+    , DraftStatus (DraftStatusDraft, DraftStatusFinal)
+    , EntryOperation (EntryOperationInitialize, EntryOperationRevise)
+    , EntryUpdateArguments (EntryUpdateArguments)
+    , FileInfo (..)
+    , argumentParser
+    , canonicalFilename
+    , draftFilename
+    )
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Encode.Pretty as Aeson
@@ -45,132 +91,18 @@ import qualified Data.ByteString.Base64 as B64
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Encoding as TL
 import qualified Options.Applicative as OA
+import qualified System.IO as IO
 
 main :: IO ()
 main = do
     defaultSubject <- fmap (Subject . T.pack) <$> lookupEnv "METADATA_SUBJECT"
     args <- OA.execParser $ OA.info (argumentParser defaultSubject <**> OA.helper) mempty
     case args of
-        ArgumentsEntryUpdate eua  -> handleEntryUpdateArguments eua
-
-data DraftStatus
-    = DraftStatusDraft
-    | DraftStatusFinal
-    deriving Show
-
-data EntryOperation
-    = EntryOperationInitialize
-    | EntryOperationRevise
-    deriving Show
-
-data AttestationField
-    = AttestationFieldName
-    | AttestationFieldDescription
-    | AttestationFieldLogo
-    | AttestationFieldUrl
-    | AttestationFieldTicker
-    deriving (Show, Eq, Ord)
-
-data FileInfo = FileInfo
-    { _FileInfoSubject :: Subject
-    , _FileInfoEntryOperation :: EntryOperation
-    , _FileInfoDraftStatus :: DraftStatus
-    }
-  deriving Show
-
-canonicalFilename :: FileInfo -> String
-canonicalFilename = (<> jsonSuffix) . T.unpack . unSubject . _FileInfoSubject
-
-jsonSuffix, draftSuffix, jsonDraftSuffix :: String
-jsonSuffix = ".json"
-draftSuffix = ".draft"
-jsonDraftSuffix = jsonSuffix <> draftSuffix
-
-draftFilename :: FileInfo -> String
-draftFilename fi = canonicalFilename fi <> draftSuffix
-
-data EntryUpdateArguments = EntryUpdateArguments
-    { _EntryUpdateArgumentsFileInfo :: FileInfo
-    , _EntryUpdateArgumentsAttestationKeyFilename :: Maybe String
-    , _EntryUpdateArgumentsAttestationFields :: [AttestationField]
-    , _EntryUpdateArgumentsRegistryEntry :: PartialGoguenRegistryEntry
-    , _EntryUpdateLogoFilename :: Maybe String
-    , _EntryUpdatePolicyFilenameOrCBOR :: Maybe String
-    }
-    deriving Show
-
-data Arguments
-    = ArgumentsEntryUpdate EntryUpdateArguments
-    deriving Show
-
-wellKnownOption
-    :: forall p. WellKnownProperty p
-    => OA.Mod OA.OptionFields p
-    -> OA.Parser p
-wellKnownOption =
-    OA.option wellKnownReader
-  where
-    wellKnownReader :: OA.ReadM p
-    wellKnownReader = OA.eitherReader $
-        Aeson.parseEither parseWellKnown . Aeson.toJSON
-
-entryUpdateArgumentParser :: Maybe Subject -> OA.Parser EntryUpdateArguments
-entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
-    <$> fileInfoArgumentParser
-    <*> optional (OA.strOption (OA.long "attest-keyfile" <> OA.short 'a' <> OA.metavar "ATTESTATION_KEY_FILE"))
-    <*> attestationFieldNamesParser
-    <*> goguenRegistryEntryParser
-    <*> logoFilenameParser
-    <*> policyParser
-  where
-    attestationFieldNamesParser :: OA.Parser [AttestationField]
-    attestationFieldNamesParser = asum
-        [ OA.flag' [AttestationFieldName] $ OA.long "attest-name" <> OA.short 'N'
-        , OA.flag' [AttestationFieldDescription] $ OA.long "attest-description" <> OA.short 'D'
-        , OA.flag' [AttestationFieldLogo] $ OA.long "attest-logo" <> OA.short 'L'
-        , OA.flag' [AttestationFieldUrl] $ OA.long "attest-url" <> OA.short 'H'
-        , OA.flag' [AttestationFieldTicker] $ OA.long "attest-ticker" <> OA.short 'T'
-        , pure
-            [ AttestationFieldName
-            , AttestationFieldDescription
-            , AttestationFieldLogo
-            , AttestationFieldUrl
-            , AttestationFieldTicker
-            ]
-       ]
-
-    fileInfoArgumentParser :: OA.Parser FileInfo
-    fileInfoArgumentParser = FileInfo
-        <$> (trimSubject <$> OA.strArgument (OA.metavar "SUBJECT") <|> defaultSubjectParser)
-        <*> OA.flag EntryOperationRevise EntryOperationInitialize (OA.long "init" <> OA.short 'i')
-        <*> OA.flag DraftStatusDraft DraftStatusFinal (OA.long "finalize" <> OA.short 'f')
-
-    defaultSubjectParser =
-        maybe empty pure defaultSubject
-
-    trimSubject :: String -> Subject
-    trimSubject subj
-        | jsonSuffix `isSuffixOf` subj =
-            Subject $ T.pack $ take (length subj - length jsonSuffix) subj
-        | jsonDraftSuffix `isSuffixOf` subj =
-            Subject $ T.pack $ take (length subj - length jsonDraftSuffix) subj
-        | otherwise =
-            Subject $ T.pack subj
-
-    logoFilenameParser :: OA.Parser (Maybe String)
-    logoFilenameParser = optional $ OA.strOption (OA.long "logo" <> OA.short 'l' <> OA.metavar "LOGO.png")
-
-    policyParser :: OA.Parser (Maybe String)
-    policyParser = optional (OA.strOption (OA.long "policy" <> OA.short 'p' <> OA.metavar "POLICY"))
-
-    goguenRegistryEntryParser :: OA.Parser (PartialGoguenRegistryEntry)
-    goguenRegistryEntryParser = GoguenRegistryEntry Nothing Nothing
-        <$> optional (emptyAttested <$> wellKnownOption (OA.long "name" <> OA.short 'n' <> OA.metavar "NAME"))
-        <*> optional (emptyAttested <$> wellKnownOption (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
-        <*> pure Nothing -- logo
-        <*> optional (emptyAttested <$> wellKnownOption (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
-        <*> optional (emptyAttested <$> wellKnownOption (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
+        ArgumentsEntryUpdate eua            -> handleEntryUpdateArguments eua
+        ArgumentsValidate fpA mFpB severity -> handleValidate severity fpA mFpB
 
 combineRegistryEntries
     :: GoguenRegistryEntry Maybe
@@ -325,7 +257,42 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInf
         json <- registryJSON
         left T.pack $ Aeson.parseEither parseRegistryEntry json
 
-argumentParser :: Maybe Subject -> OA.Parser Arguments
-argumentParser defaultSubject = asum
-    [ ArgumentsEntryUpdate <$> entryUpdateArgumentParser defaultSubject
-    ]
+handleValidate :: Severity -> FilePath -> Maybe FilePath -> IO ()
+handleValidate logSeverity fpA mFpB = do
+  let
+    logAction :: MonadIO m => LogAction m Message
+    logAction = filterBySeverity logSeverity msgSeverity (cmap fmtMessage logTextStdout)
+
+  usingLoggerT logAction $ do
+    fileA  <- parseFile parseValidationMetadata fpA 
+    mFileB <- traverse (parseFile parseValidationMetadata) mFpB
+
+    let
+      difference =
+        case mFileB of
+          Nothing    -> Added fileA
+          Just fileB -> Changed fileA fileB
+
+    case walletValidationRules `apply` difference of
+      Failure errs -> do
+        _ <- traverse (log E . prettyPrintValidationError prettyPrintWalletValidationError) errs
+        liftIO exitFailure
+      Success ()   -> do
+        log I "Wallet metadata validation successful!"
+        liftIO exitSuccess
+
+  where
+    parseFile :: (MonadIO m, WithLog env Message m) => (Text -> m a) -> FilePath -> m (File a)
+    parseFile parserA fp = do
+      size     <- liftIO $ withFile fp IO.ReadMode $ hFileSize
+      contents <- liftIO $ handleAny (const mempty) $ readFile fp
+      a        <- parserA contents
+      pure (File a (fromInteger size) fp)
+
+    parseValidationMetadata :: (MonadIO m, WithLog env Message m) => Text -> m Metadata
+    parseValidationMetadata contents = do
+      case Aeson.eitherDecode (TL.encodeUtf8 $ TL.fromStrict contents) of
+        Left err   -> do
+          log E $ "Failed to parse validation metadata. Error was: '" <> T.pack (show err) <> "', from JSON: '" <> contents <> "'."
+          liftIO $ exitFailure
+        Right meta -> pure meta

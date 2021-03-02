@@ -31,7 +31,7 @@ your `assetName` is empty, then the `policyId` is your subject. We'll consider t
 From there, initialize a new submission using `--init` as follows:
 
 ```console
-cardano-metadata-submitter --init 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0
+cardano-metadata-submitter entry --init 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0
 ```
 
 This creates a draft JSON file named after your subject.
@@ -49,7 +49,7 @@ Asset metadata have a set of required well-known properties. At minima, you'll t
 You can pass multiple commands at once to edit a draft submission. For example:
 
 ```console
-cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 \
+cardano-metadata-submitter entry 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 \
   --name "ギル" \
   --description "The currency in all of the Final Fantasy games." \
   --policy policy.json
@@ -67,7 +67,7 @@ cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439
 | `logo`   | a PNG image file                                                      | `--logo \| -l`   |
 
 ```console
-cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 \
+cardano-metadata-submitter entry 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 \
   --ticker "GIL" \
   --url "https://finalfantasy.fandom.com/wiki/Gil" \
   --logo "icon.png"
@@ -84,7 +84,7 @@ verification is done. It is therefore possible for a previously valid metadata t
 To attest all metadata at once, simple provide a signing key file (bech32, hexadecimal or cardano-cli's text envelope):
 
 ```console
-cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk
+cardano-metadata-submitter entry 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk
 ```
 
 The policy from this example is quite straightforward and simply requires all signatures from a single key. So a single attestation of that key for each metadata item is sufficient.
@@ -95,7 +95,7 @@ prefix to each long command (e.g. `-N` or `--attest-name` for `name`, `-T` or `-
 > For example, if you want to only attest for the name and the ticker, you can run the following:
 >
 > ```console
-> cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk \
+> cardano-metadata-submitter entry 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 -a policy.sk \
 >     --attest-name \
 >     --attest-ticker
 > ```
@@ -107,10 +107,32 @@ considered valid. That is, it has to have sufficient attestations and must conta
 update it alter on via the same process. Always think about using `--finalize` before submitting or re-submitting as a sanity check.
 
 ```console
-cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 --finalize
+cardano-metadata-submitter entry 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0 --finalize
 ```
 
 Your metadata is now ready to submit :tada:!
+
+### Validating metadata
+
+You might need to validate changes to existing metadata, or validate
+metadata obtained from elsewhere (perhaps you're running your own
+registry). By using the command:
+
+```console
+cardano-metadata-submitter validate 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0.json
+```
+
+You can validate a metadata entry. This performs some additional
+validation not performed by the entry command, for example, checking
+that the maximum file size does not exceed limit.
+
+By using the command:
+
+```console
+cardano-metadata-submitter validate 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0.json updates/19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0.json
+```
+
+You can confirm that an update to an existing metadata entry is valid.
 
 ## How to build
 
