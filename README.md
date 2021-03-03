@@ -60,7 +60,7 @@ cardano-metadata-submitter 19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439
 
 | Field    | Details                                                               | Command          |
 | ---      | ---                                                                   | ---              |
-| `ticker` | between 2 and 4 UTF-8 characters                                      | `--ticker \| -t` |
+| `ticker` | between 2 and 5 UTF-8 characters                                      | `--ticker \| -t` |
 | `url`    | a valid https URI                                                     | `--url \| -h`    |
 | `unit`   | a comma separated integer and a string of at most 30 UTF-8 characters | `--unit \| -u`   |
 | `logo`   | a PNG image file                                                      | `--logo \| -l`   |
