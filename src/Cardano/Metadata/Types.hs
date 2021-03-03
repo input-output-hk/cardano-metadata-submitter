@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE DerivingStrategies #-}
@@ -188,6 +189,9 @@ prettyPolicy = \case
         show $ ppTimelock $ toAllegraTimelock s
     Policy _ (ScriptInEra _ (SimpleScript SimpleScriptV2 s)) ->
         show $ ppTimelock $ toAllegraTimelock s
+#if !(MIN_VERSION_base(4,14,0))
+    _ -> panic "impossible pattern match"
+#endif
 
 hashPolicy :: Policy -> ScriptHash
 hashPolicy (Policy _ (ScriptInEra _ script)) =
@@ -216,6 +220,9 @@ evaluatePolicy (Policy _ script) atSlot sigs =
             evaluateAtSlot $ toAllegraTimelock s
         ScriptInEra _ (SimpleScript SimpleScriptV2 s) ->
             evaluateAtSlot $ toAllegraTimelock s
+#if !(MIN_VERSION_base(4,14,0))
+        _ -> panic "impossible pattern match"
+#endif
   where
     evaluateAtSlot :: Timelock StandardCrypto -> Either Text ()
     evaluateAtSlot s
