@@ -10,6 +10,7 @@ let cli, getDraft, withDraft, getFinal, writeTmpFile;
 
 const alice = "19309eb9c066253cede617dc635223ace320ae0bbdd5bd1968439cd0";
 const bob = "04c24626761279476a9da9b9d851328cab93d92e7a8790852e42ff894b746f725a436f696e";
+const carole = "b78a3dd6ce08fc78cdff0aa8637a3e2a4527b91721180fd6728ae9d3";
 
 const policies =
     { [alice]: {
@@ -25,11 +26,19 @@ const policies =
             { "type": "sig", "keyHash": "a8a511c306eb0fd3e503116f594e9beb2274a3c178b172d3ed2e42cf" },
         ]
       }
+    , [carole]: {
+        "type": "all",
+        "scripts": [
+            { "type": "sig", "keyHash": "8c322807654619d4e4ff2437c7d27db5e0610e11795233da82290a98" },
+            { "type": "before", "slot": 42 },
+        ]
+      }
     }
 
 const policyFiles =
     { [alice]: alice+".policy.json"
     , [bob]: bob+".policy.json"
+    , [carole]: carole+".policy.json"
     }
 
 const keys =
@@ -43,11 +52,18 @@ const keys =
       [ "addr_sk1pxpsyh9vac05ewq9eqey34zkvx06esedh6rlazdrja6epr7fmzfsdsyqag"
       , "0dc7a75e1337cb8f2f5902598f2dc1942a30d3c03333fc7d4834c3d2166718e2"
       ]
+  , [carole]:
+      [ ` { "type": "PaymentSigningKeyShelley_ed25519"
+          , "description": "Payment Signing Key"
+          , "cborHex": "5820a27a677bba62a1ab1934084fc6d820d59229a29a1d92401fd96a26ee6c072dd7"
+          }`
+      ]
   }
 
 const keyFiles =
     { [alice]: [alice+".0.sk"]
     , [bob]: [bob+".0.sk", bob+".1.sk"]
+    , [carole]: [carole+".0.sk"]
     }
 
 describe("cardano-metadata-submitter", () => {
@@ -128,15 +144,10 @@ describe("cardano-metadata-submitter", () => {
   describe("Signing", () => {
     before(fixture);
     beforeEach(() => {
-      writeTmpFile(keyFiles[alice][0], keys[alice][0]);
-      writeTmpFile(policyFiles[alice], JSON.stringify(policies[alice]));
       cli(alice, "--init");
       cli(alice, "--name", "foo", "--description", "lorem ipsum");
       cli(alice, "--policy", policyFiles[alice]);
 
-      writeTmpFile(keyFiles[bob][0], keys[bob][0]);
-      writeTmpFile(keyFiles[bob][1], keys[bob][1]);
-      writeTmpFile(policyFiles[bob], JSON.stringify(policies[bob]));
       cli(bob, "--init");
       cli(bob, "--name", "foo", "--description", "lorem ipsum");
       cli(bob, "--policy", policyFiles[bob]);
@@ -221,6 +232,30 @@ describe("cardano-metadata-submitter", () => {
       } catch (e) {}
     });
   });
+
+
+  describe("Time Constraints", () => {
+    before(fixture);
+
+    it("Carole can attest even with expired time constraints", () => {
+      cli(carole, "--init");
+      cli(carole, "--name", "foo", "--description", "lorem ipsum");
+      cli(carole, "--policy", policyFiles[carole]);
+      cli(carole, "-a", keyFiles[carole][0]);
+      cli(carole, "--finalize");
+    });
+
+    it("Alice can't attest for Carole", () => {
+      cli(carole, "--init");
+      cli(carole, "--name", "foo", "--description", "lorem ipsum");
+      cli(carole, "--policy", policyFiles[carole]);
+      cli(carole, "-a", keyFiles[alice][0]);
+      try {
+        cli(carole, "--finalize");
+        assert.fail("should have thrown.");
+      } catch (e) {}
+    });
+  });
 });
 
 function fixture(done) {
@@ -249,6 +284,18 @@ function fixture(done) {
       writeTmpFile = function writeTmpFile(filename, buffer) {
         writeFileSync(path.join(cwd, filename), buffer);
       }
+
+      // Make all known keys and policies available in the tmp state directory.
+
+      Object.getOwnPropertyNames(keys).forEach(subject => {
+        keys[subject].forEach((k, i) => {
+          writeTmpFile(keyFiles[subject][i], keys[subject][i])
+        });
+      });
+
+      Object.getOwnPropertyNames(policies).forEach(subject => {
+        writeTmpFile(policyFiles[subject], JSON.stringify(policies[subject]));
+      });
     })
     .then(done)
     .catch(console.fatal);
