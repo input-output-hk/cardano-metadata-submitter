@@ -425,7 +425,7 @@ validateMetadataPolicy t = Policy t <$>
 
 validateMetadataTicker :: MonadFail f => Text -> f Ticker
 validateMetadataTicker = fmap Ticker .
-    (validateMinLength 2 >=> validateMaxLength 4)
+    (validateMinLength 2 >=> validateMaxLength 5)
 
 validateMetadataDescription :: MonadFail f => Text -> f Description
 validateMetadataDescription = fmap Description .
