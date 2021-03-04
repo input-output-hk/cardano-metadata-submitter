@@ -91,8 +91,6 @@ import Cardano.Ledger.ShelleyMA.Timelocks
     , ValidityInterval (..)
     , ppTimelock
     )
-import Cardano.Slotting.Slot
-    ( SlotNo (..) )
 import Codec.Picture.Png
     ( decodePng )
 import Control.Category
@@ -110,7 +108,7 @@ import Network.URI
 import Ouroboros.Consensus.Shelley.Eras
     ( StandardCrypto )
 import Shelley.Spec.Ledger.BaseTypes
-    ( StrictMaybe (SJust, SNothing) )
+    ( StrictMaybe (..) )
 import Shelley.Spec.Ledger.Keys
     ( KeyHash (..), KeyRole (Witness) )
 
@@ -211,22 +209,21 @@ verifyPolicy policy (Subject subject) = do
 
 evaluatePolicy
     :: Policy
-    -> SlotNo
     -> [AttestationSignature]
     -> Either Text ()
-evaluatePolicy (Policy _ script) atSlot sigs =
+evaluatePolicy (Policy _ script) sigs =
     case script of
         ScriptInEra _ (SimpleScript SimpleScriptV1 s) ->
-            evaluateAtSlot $ toAllegraTimelock s
+            evaluateScript $ toAllegraTimelock s
         ScriptInEra _ (SimpleScript SimpleScriptV2 s) ->
-            evaluateAtSlot $ toAllegraTimelock s
+            evaluateScript $ toAllegraTimelock s
 #if !(MIN_VERSION_base(4,14,0))
         _ -> panic "impossible pattern match"
 #endif
   where
-    evaluateAtSlot :: Timelock StandardCrypto -> Either Text ()
-    evaluateAtSlot s
-        | evalTimelock hashes (ValidityInterval (SJust atSlot) (SJust atSlot)) s =
+    evaluateScript :: Timelock StandardCrypto -> Either Text ()
+    evaluateScript s
+        | isValidScript hashes (ValidityInterval SNothing SNothing) s =
             Right ()
         | otherwise =
             Left "Unable to validate the monetary policy now and with current attestations."
@@ -235,34 +232,24 @@ evaluatePolicy (Policy _ script) atSlot sigs =
     hashes = Set.fromList
         $ Shelley.hashKey . Shelley.VKey . _attestationSignature_publicKey <$> sigs
 
-    evalTimelock
+    isValidScript
         :: (crypto ~ StandardCrypto)
         => Set (KeyHash 'Witness crypto)
         -> ValidityInterval
         -> Timelock crypto
         -> Bool
-    evalTimelock _vhks (ValidityInterval start _) (RequireTimeStart lockStart) =
-        lockStart `lteNegInfty` start
-    evalTimelock _vhks (ValidityInterval _ end) (RequireTimeExpire lockExp) =
-        end `ltePosInfty` lockExp
-    evalTimelock vhks _vi (RequireSignature hash) =
+    isValidScript _vhks (ValidityInterval _start _) (RequireTimeStart _lockStart) =
+        True
+    isValidScript _vhks (ValidityInterval _ _end) (RequireTimeExpire _lockExp) =
+        True
+    isValidScript vhks _vi (RequireSignature hash) =
         Set.member hash vhks
-    evalTimelock vhks vi (RequireAllOf xs) =
-        all (evalTimelock vhks vi) xs
-    evalTimelock vhks vi (RequireAnyOf xs) =
-        any (evalTimelock vhks vi) xs
-    evalTimelock vhks vi (RequireMOf m xs) =
-        m <= sum (fmap (\x -> if evalTimelock vhks vi x then 1 else 0) xs)
-
-    -- | less-than-equal comparison, where Nothing is negative infinity
-    lteNegInfty :: SlotNo -> StrictMaybe SlotNo -> Bool
-    lteNegInfty _ SNothing = False -- i > -∞
-    lteNegInfty i (SJust j) = i <= j
-
-    -- | less-than-equal comparison, where Nothing is positive infinity
-    ltePosInfty :: StrictMaybe SlotNo -> SlotNo -> Bool
-    ltePosInfty SNothing _ = False -- ∞ > j
-    ltePosInfty (SJust i) j = i <= j
+    isValidScript vhks vi (RequireAllOf xs) =
+        all (isValidScript vhks vi) xs
+    isValidScript vhks vi (RequireAnyOf xs) =
+        any (isValidScript vhks vi) xs
+    isValidScript vhks vi (RequireMOf m xs) =
+        m <= sum (fmap (\x -> if isValidScript vhks vi x then 1 else 0) xs)
 
 -- | Conversion for the 'Timelock.Timelock' language that is shared between the
 -- Allegra and Mary eras.

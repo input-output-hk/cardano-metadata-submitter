@@ -11,8 +11,6 @@ import Cardano.CLI.Shelley.Key
     ( readSigningKeyFile )
 import Cardano.CLI.Types
     ( SigningKeyFile (..) )
-import Cardano.Metadata.CurrentSlot
-    ( getCurrentSlot, mainnetSlotParameters, testnetSlotParameters )
 import Cardano.Metadata.GoguenRegistry
     ( GoguenRegistryEntry (..)
     , PartialGoguenRegistryEntry
@@ -300,13 +298,7 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInf
         Just k -> attestFields k props newRecord
         Nothing -> pure newRecord
 
-    -- FIXME: Allow users to specify a different start time and/or slot
-    -- NOTE: Only useful for validating scripts which contains timelocks.
-    slot <- lookupEnv "CARDANO_TESTNET" >>= \case
-        Just{}  -> getCurrentSlot testnetSlotParameters
-        Nothing -> getCurrentSlot mainnetSlotParameters
-
-    let finalVerificationStatus = validateEntry slot newRecordWithAttestations
+    let finalVerificationStatus = validateEntry newRecordWithAttestations
 
     BL8.writeFile (draftFilename fInfo) (Aeson.encodePretty newRecordWithAttestations)
     case _FileInfoDraftStatus fInfo of
