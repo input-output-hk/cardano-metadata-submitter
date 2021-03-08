@@ -30,8 +30,6 @@ import Cardano.Metadata.Types
     , verifyAttested
     , verifyPolicy
     )
-import Cardano.Slotting.Slot
-    ( SlotNo (..) )
 import Control.Arrow
     ( left )
 import Data.Aeson
@@ -129,10 +127,9 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
         }
 
 validateEntry
-    :: SlotNo
-    -> PartialGoguenRegistryEntry
+    :: PartialGoguenRegistryEntry
     -> Either Text ()
-validateEntry atSlot record = do
+validateEntry record = do
     -- 1. Verify that mandatory fields are present
     subject <- verifyField _goguenRegistryEntry_subject
     policy  <- verifyField _goguenRegistryEntry_policy
@@ -154,7 +151,7 @@ validateEntry atSlot record = do
                     , prettyPolicy policy
                     ]
             left (const policyEvaluationFailed) $
-                evaluatePolicy policy atSlot attestations
+                evaluatePolicy policy attestations
 
     verifyLocalAttestations "name" name
     verifyLocalAttestations "description" desc

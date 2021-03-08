@@ -18,7 +18,6 @@ flag development
 library
   exposed-modules: Cardano.Metadata.Types
                  , Cardano.Metadata.GoguenRegistry
-                 , Cardano.Metadata.CurrentSlot
   other-modules: AesonHelpers
   build-depends: base
                , aeson
