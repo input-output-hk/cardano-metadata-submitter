@@ -1,6 +1,6 @@
 # Cardano Metadata Submitter
 
-A library and CLI for manipulating data intended for the [Goguen Metadata Registry](https://github.com/cardano-foundation/goguen-metadata-registry). See the link for more information about the Metadata Registry itself.
+A library and CLI for manipulating data intended for the [Cardano Token Registry](https://github.com/cardano-foundation/cardano-token-registry). See the link for more information about the Metadata Registry itself.
 
 ## How to use
 
