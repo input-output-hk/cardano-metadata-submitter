@@ -4,6 +4,8 @@ A library and CLI for manipulating data intended for the [Cardano Token Registry
 
 ## How to use
 
+> :package: [Download pre-compiled linux executable](https://hydra.iohk.io/job/Cardano/cardano-metadata-submitter/native.metadataSubmitterTarball.x86_64-linux/latest-finished) or see instructions below to [:hammer: build from source](#how-to-build). 
+
 The instruction below supposes that users have already been through the process of creating a monetary script for Cardano and knows a bit about native assets on Cardano. If this doesn't a ring a bell, start off by reading through the [developer guide on Native Assets](https://developers.cardano.org/en/development-environments/native-tokens/native-tokens/). 
 
 ### Creating a new entry 
