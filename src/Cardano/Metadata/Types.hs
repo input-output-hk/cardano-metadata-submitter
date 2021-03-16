@@ -100,8 +100,6 @@ import Data.Aeson
     ( FromJSON (..), ToJSON (..), (.:), (.=) )
 import Data.Maybe
     ( fromJust )
-import Data.Text.Read
-    ( decimal )
 import Network.URI
     ( URI (..), parseAbsoluteURI )
 import Ouroboros.Consensus.Shelley.Eras
@@ -349,16 +347,6 @@ validateMaxLength n text
     | otherwise = fail $ "Length must be no more than " ++ show n ++ " characters, got " ++ show len
   where
     len = T.length text
-
-validateMinimum :: MonadFail f => (Ord a, Show a) => a -> a -> f a
-validateMinimum minN n
-    | n > minN = pure n
-    | otherwise = fail $ "Value must be strictly greater than " ++ show minN
-
-validateMaximum :: MonadFail f => (Ord a, Show a) => a -> a -> f a
-validateMaximum maxN n
-    | n < maxN = pure n
-    | otherwise = fail $ "Value must be strictly smaller than " ++ show maxN
 
 validateBase16 :: MonadFail f => Text -> f ByteString
 validateBase16 =
