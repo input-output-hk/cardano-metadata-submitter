@@ -33,7 +33,6 @@ module Cardano.Metadata.Types
     , Logo (..)
     , Url(..)
     , Ticker(..)
-    , Unit(..)
 
       -- * Attestation
     , Attested (..)
@@ -320,39 +319,6 @@ instance WellKnownProperty Url where
     parseWellKnown =
         Aeson.withText "url" validateMetadataURL
 
-data Unit = Unit
-    { unitName :: Text
-    , unitDecimals :: Integer
-    } deriving (Show, Eq)
-
-instance WellKnownProperty Unit where
-    wellKnownPropertyName _ =
-        Property "unit"
-    wellKnownToBytes u = mconcat
-        [ CBOR.encodeMapLenIndef
-        , CBOR.encodeString "name"
-        , CBOR.encodeString (unitName u)
-        , CBOR.encodeString "decimals"
-        , CBOR.encodeWord (fromIntegral $ unitDecimals u)
-        , CBOR.encodeBreak
-        ]
-    wellKnownToJSON u = Aeson.object
-        [ "name" .= unitName u
-        , "decimals" .=  unitDecimals u
-        ]
-    parseWellKnown = \v -> parseAsText v <|> parseAsObject v
-      where
-        parseAsText = Aeson.withText "unit" $ \t -> case decimal t of
-            Left e -> fail e
-            Right (decimals, name) ->
-                validateMetadataUnit (T.drop 1 name) decimals
-
-        parseAsObject = Aeson.withObject "unit" $ \o -> do
-            name <- Aeson.prependFailure "unit" (o .: "name")
-            decimals <- Aeson.prependFailure "unit" (o .: "decimals")
-            AesonHelpers.noOtherFields "unit" o [ "name", "decimals" ]
-            validateMetadataUnit name decimals
-
 newtype Ticker = Ticker { unTicker :: Text }
     deriving (Show, Eq)
 
@@ -417,12 +383,6 @@ validateMetadataTicker = fmap Ticker .
 validateMetadataDescription :: MonadFail f => Text -> f Description
 validateMetadataDescription = fmap Description .
     validateMaxLength 500
-
-validateMetadataUnit :: MonadFail f => Text -> Integer -> f Unit
-validateMetadataUnit name decimals = Unit name decimals <$
-    (  validateMinLength 1 name >>= validateMaxLength 30
-    >> validateMaximum 20 decimals >>= validateMinimum 0
-    )
 
 validateMetadataLogo :: MonadFail f => ByteString -> f Logo
 validateMetadataLogo bytes

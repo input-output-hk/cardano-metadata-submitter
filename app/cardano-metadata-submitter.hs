@@ -69,7 +69,6 @@ data AttestationField
     | AttestationFieldDescription
     | AttestationFieldLogo
     | AttestationFieldUrl
-    | AttestationFieldUnit
     | AttestationFieldTicker
     deriving (Show, Eq, Ord)
 
@@ -131,14 +130,12 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
         , OA.flag' [AttestationFieldDescription] $ OA.long "attest-description" <> OA.short 'D'
         , OA.flag' [AttestationFieldLogo] $ OA.long "attest-logo" <> OA.short 'L'
         , OA.flag' [AttestationFieldUrl] $ OA.long "attest-url" <> OA.short 'H'
-        , OA.flag' [AttestationFieldUnit] $ OA.long "attest-unit" <> OA.short 'U'
         , OA.flag' [AttestationFieldTicker] $ OA.long "attest-ticker" <> OA.short 'T'
         , pure
             [ AttestationFieldName
             , AttestationFieldDescription
             , AttestationFieldLogo
             , AttestationFieldUrl
-            , AttestationFieldUnit
             , AttestationFieldTicker
             ]
        ]
@@ -173,7 +170,6 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "description" <> OA.short 'd' <> OA.metavar "DESCRIPTION"))
         <*> pure Nothing -- logo
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
-        <*> optional (emptyAttested <$> wellKnownOption (OA.long "unit" <> OA.short 'u' <> OA.metavar "UNIT"))
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
 
 combineRegistryEntries
@@ -193,8 +189,6 @@ combineRegistryEntries new old = GoguenRegistryEntry
         _goguenRegistryEntry_logo new `combineAttestedEntry` _goguenRegistryEntry_logo old
     , _goguenRegistryEntry_url =
         _goguenRegistryEntry_url new `combineAttestedEntry` _goguenRegistryEntry_url old
-    , _goguenRegistryEntry_unit =
-        _goguenRegistryEntry_unit new `combineAttestedEntry` _goguenRegistryEntry_unit old
     , _goguenRegistryEntry_ticker =
         _goguenRegistryEntry_ticker new `combineAttestedEntry` _goguenRegistryEntry_ticker old
     }
@@ -225,8 +219,6 @@ attestFields (SomeSigningKey someSigningKey) props old = do
             attestField AttestationFieldLogo subj <$> _goguenRegistryEntry_logo old
         , _goguenRegistryEntry_url =
             attestField AttestationFieldUrl subj <$> _goguenRegistryEntry_url old
-        , _goguenRegistryEntry_unit =
-            attestField AttestationFieldUnit subj <$> _goguenRegistryEntry_unit old
         , _goguenRegistryEntry_ticker =
             attestField AttestationFieldTicker subj <$> _goguenRegistryEntry_ticker old
         }
@@ -264,7 +256,6 @@ handleEntryUpdateArguments (EntryUpdateArguments fInfo keyfile props newEntryInf
             , _goguenRegistryEntry_description = Nothing
             , _goguenRegistryEntry_logo = Nothing
             , _goguenRegistryEntry_url = Nothing
-            , _goguenRegistryEntry_unit = Nothing
             , _goguenRegistryEntry_ticker = Nothing
             }
 
