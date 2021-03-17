@@ -20,7 +20,6 @@ import Cardano.Metadata.Types
     , Property (..)
     , Subject (..)
     , Ticker (..)
-    , Unit (..)
     , Url (..)
     , WellKnownProperty (..)
     , evaluatePolicy
@@ -53,7 +52,6 @@ data GoguenRegistryEntry f = GoguenRegistryEntry
     , _goguenRegistryEntry_description :: f (Attested Description)
     , _goguenRegistryEntry_logo :: f (Attested Logo)
     , _goguenRegistryEntry_url :: f (Attested Url)
-    , _goguenRegistryEntry_unit :: f (Attested Unit)
     , _goguenRegistryEntry_ticker :: f (Attested Ticker)
     }
 
@@ -64,7 +62,6 @@ deriving instance
     , Show (f (Attested Description))
     , Show (f (Attested Logo))
     , Show (f (Attested Url))
-    , Show (f (Attested Unit))
     , Show (f (Attested Ticker))
     ) => Show (GoguenRegistryEntry f)
 
@@ -83,8 +80,6 @@ instance ToJSON (GoguenRegistryEntry Maybe) where
                 <$> (_goguenRegistryEntry_logo r)
           , (\x -> unProperty (wellKnownPropertyName (Proxy @Url)) .= fmap wellKnownToJSON x)
                 <$> (_goguenRegistryEntry_url r)
-          , (\x -> unProperty (wellKnownPropertyName (Proxy @Unit)) .= fmap wellKnownToJSON x)
-                <$> (_goguenRegistryEntry_unit r)
           , (\x -> unProperty (wellKnownPropertyName (Proxy @Ticker)) .= fmap wellKnownToJSON x)
                 <$> (_goguenRegistryEntry_ticker r)
           ]
@@ -105,14 +100,12 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
     descField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Description)
     logoField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Logo)
     urlField    <- o .:? unProperty (wellKnownPropertyName $ Proxy @Url)
-    unitField   <- o .:? unProperty (wellKnownPropertyName $ Proxy @Unit)
     tickerField <- o .:? unProperty (wellKnownPropertyName $ Proxy @Ticker)
 
     nameAnn   <- mapM parseWithAttestation nameField
     descAnn   <- mapM parseWithAttestation descField
     logoAnn   <- mapM parseWithAttestation logoField
     urlAnn    <- mapM parseWithAttestation urlField
-    unitAnn   <- mapM parseWithAttestation unitField
     tickerAnn <- mapM parseWithAttestation tickerField
 
     pure $ GoguenRegistryEntry
@@ -122,7 +115,6 @@ parseRegistryEntry = Aeson.withObject "GoguenRegistryEntry" $ \o -> do
         , _goguenRegistryEntry_description = descAnn
         , _goguenRegistryEntry_logo = logoAnn
         , _goguenRegistryEntry_url = urlAnn
-        , _goguenRegistryEntry_unit = unitAnn
         , _goguenRegistryEntry_ticker = tickerAnn
         }
 
@@ -158,7 +150,6 @@ validateEntry record = do
 
     forM_ (_goguenRegistryEntry_logo record) $ verifyLocalAttestations "logo"
     forM_ (_goguenRegistryEntry_url record) $ verifyLocalAttestations "url"
-    forM_ (_goguenRegistryEntry_unit record) $ verifyLocalAttestations "unit"
     forM_ (_goguenRegistryEntry_ticker record) $ verifyLocalAttestations "ticker"
   where
     verifyField :: (PartialGoguenRegistryEntry -> Maybe a) -> Either Text a
