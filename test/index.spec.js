@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const { readFileSync, writeFileSync } = require('fs');
 const { mkdtemp } = require('fs/promises');
+const { copySync } = require('fs-extra');
 const os = require('os');
 const path = require('path');
 const { assert } = require('chai');
@@ -89,6 +90,30 @@ describe("cardano-metadata-submitter", () => {
       assert.deepEqual(getDraft(alice).name, { ...empty, value: name });
       assert.deepEqual(getDraft(alice).description, { ...empty, value: description });
       assert.deepEqual(getDraft(alice).policy, policy);
+    });
+
+
+    it("Add optional fields", () => {
+      const ticker = `GIL`;
+      const url = `https://finalfantasy.fandom.com/wiki/Gil`;
+      const logo = `testData/icon.png`
+      const logoSerialized = "iVBORw0KGgoAAAANSUhEUgAAABkAAAAeCAYAAADZ7LXbAAAACXBIWXMAAA7EAAAOxAGVKw4bAAACbUlEQVRIie3Vy0tUURzA8e855965c8lXUhlhEQVBSEmQRAURQbSIEqFl4N6/oHYtAhdtonatK8hVBCERZC+0jbZpIRVkIeagTJrO3Nd5tBhDMHOcGiHCA2dxHvDh9zs/fkc45xwbPORGA5tI/RFdGCL9MgAm/mNEVKuuaHA3OW+RlDb8zjt4O07VjFRPV8NBZC5PGMxj3/YQv7uGs7p+iJ5+ipgfIZr7hnWSXBjgT98iHr6IS+fqg7h0Dl8ZQpmQFKdJSmWkkuSj10TD3WCzv0f89m6S8BjWQehbVDpPWiojsASlEeLxG3WIJFtANneQei3EqpnMeWRxgtMahYGP/dhoqiry2+rKJh9i3l8l2KIRUlVQazDlRXTpOzIr43uQ7LlCvrO/9kjisT7Ehz6CBgtCki4sEC+ALpdQQUC+qQmXC3EO3NQAsHaP/QVx1mBnh5BKYpOYON2L6npJ/sw4svMRacmCc+TyOQwKGX/CRl9rQ4SQyPZeFqM27L7bhCcHUY37AVCtR7EtZ8EZhLN4vkIKhy1N1Ibo4ijq83UavAl04QmIFVekB1aDNQhnQFBZ14KABauRaFThHrrwbPmkPImYeQw6A5OBNRjnIxsPrIl4KzdUcwep9SFL8JVHNnqJeFcvyBCm7hJQBKPBZJWH334eGe5cE1m1hKM3l8nP3kcICVLiEEuXLfycQKpBnnhRtWmuWsLBkZtEucNYa8BkCJMiTFrJ/RLgHJjWc+vqyqsiMthGePo5SWsP2ohKWpamdZBqQbz1AvnjD6oCsI7/RM+8whTHljf8RrzWLlTLoXUB60LqMf6NP34T+T+RH/HOKLJ+ho1iAAAAAElFTkSuQmCC"
+
+      copyTestData();
+      cli(alice, "--ticker", ticker, "--url", url, "--logo", logo);
+
+      const empty = { sequenceNumber: 0, signatures: [] };
+      assert.deepEqual(getDraft(alice).ticker, { ...empty, value: ticker });
+      assert.deepEqual(getDraft(alice).url, { ...empty, value: url });
+      assert.deepEqual(getDraft(alice).logo, { ...empty, value: logoSerialized });
+    });
+
+    it("No other fields are supported!", () => {
+      const unit = `2,cents`;
+      try {
+        cli(alice, "--unit ", unit);
+        assert.fail("should have thrown.");
+      } catch (e) {}
     });
 
     it("Validate after signing", () => {
@@ -261,6 +286,10 @@ describe("cardano-metadata-submitter", () => {
 function fixture(done) {
   mkdtemp(path.join(os.tmpdir(), "cardano-metadata-submitter"))
     .then(cwd => {
+      copyTestData = function copyTestData() {
+        copySync(path.join(__dirname, "testData"), path.join(cwd, "testData"))
+      };
+
       cli = function cli(subject, ...args) {
         const prepared = args.map(arg => arg.startsWith("-") ? arg : `"${arg}"`);
         const opts = { cwd, stdio: 'ignore'  }
