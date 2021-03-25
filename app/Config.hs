@@ -19,8 +19,6 @@ import Cardano.Metadata.GoguenRegistry
     ( GoguenRegistryEntry (..), PartialGoguenRegistryEntry )
 import Cardano.Metadata.Types
     ( Subject (..), WellKnownProperty (..), emptyAttested )
-import Cardano.Slotting.Slot
-    ( SlotNo (..) )
 import Colog
     ( pattern D, pattern E, pattern I, Severity, pattern W )
 import Control.Applicative
@@ -37,19 +35,10 @@ import qualified Options.Applicative as OA
 
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Types as Aeson
-import qualified Data.Bifunctor as Bifunctor
 import qualified Data.Text as T
 import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Char as P
-import qualified Text.Megaparsec.Char.Lexer as P
 
 type Parser = P.Parsec Void Text
-
-data SlotNoPreference
-  = MainnetTip
-  | TestnetTip
-  | CustomSlot SlotNo
-  deriving (Eq, Show)
 
 data DraftStatus
     = DraftStatusDraft
@@ -161,28 +150,6 @@ entryUpdateArgumentParser defaultSubject = EntryUpdateArguments
         <*> pure Nothing -- logo
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "url" <> OA.short 'h' <> OA.metavar "URL"))
         <*> optional (emptyAttested <$> wellKnownOption (OA.long "ticker" <> OA.short 't' <> OA.metavar "TICKER"))
-
-pSlotNoPreference :: OA.Parser SlotNoPreference
-pSlotNoPreference = 
-  OA.option (readerFromParser pSlotPref)
-    ( OA.long "slot-no"
-    <> OA.help "Slot number to use to validate wallet metadata scripts (mainnet | testnet | <WORD64>)"
-    )
-
-pSlotPref :: Parser SlotNoPreference
-pSlotPref = asum [ MainnetTip <$ P.string "mainnet"
-                 , TestnetTip <$ P.string "testnet"
-                 , CustomSlot <$> P.decimal
-                 , pure MainnetTip
-                 ]
-
-readerFromParser :: Parser a -> OA.ReadM a
-readerFromParser p =
-  OA.eitherReader
-    (  Bifunctor.first P.errorBundlePretty
-     . P.runParser (p <* P.eof) "cmd-line-args"
-     . T.pack
-    )
 
 pLogSeverity :: OA.Parser Colog.Severity
 pLogSeverity = pDebug <|> pInfo <|> pWarning <|> pError <|> pure I
