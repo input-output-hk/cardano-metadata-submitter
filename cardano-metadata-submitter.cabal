@@ -18,6 +18,7 @@ flag development
 library
   exposed-modules: Cardano.Metadata.Types
                  , Cardano.Metadata.GoguenRegistry
+                 , Cardano.Metadata.Validation.Wallet
   other-modules: AesonHelpers
   build-depends: base
                , aeson
@@ -39,6 +40,12 @@ library
                , containers
                , cborg
                , time
+               , co-log
+               , megaparsec
+               , mtl
+               , filepath
+               , metadata-lib
+               , validation
   hs-source-dirs: src
   default-language: Haskell2010
   default-extensions: NoImplicitPrelude
@@ -55,8 +62,13 @@ executable cardano-metadata-submitter
                      , bytestring
                      , cardano-prelude
                      , cardano-metadata-submitter
+                     , safe-exceptions
+                     , co-log
+                     , validation
                      , directory
                      , optparse-applicative
+                     , megaparsec
+                     , metadata-lib
                      , text
                      , cardano-api
                      , cardano-cli
@@ -68,3 +80,4 @@ executable cardano-metadata-submitter
                       OverloadedStrings
   if (!flag(development))
     ghc-options: -Werror -Wall
+  other-modules:       Config

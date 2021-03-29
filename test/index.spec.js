@@ -294,7 +294,7 @@ function fixture(done) {
         const prepared = args.map(arg => arg.startsWith("-") ? arg : `"${arg}"`);
         const opts = { cwd, stdio: 'ignore'  }
         // const opts = { cwd }
-        return execSync(`cardano-metadata-submitter ${subject} ${prepared.join(" ")}`, opts);
+        return execSync(`cardano-metadata-submitter entry ${subject} ${prepared.join(" ")}`, opts);
       };
 
       getDraft = function getDraft(subject) {

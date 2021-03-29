@@ -17,8 +17,8 @@ import Build
     , Optimizations (Fast)
     , StackExtraTestArgs (StackExtraTestArgs)
     , TestRun (TestRun)
-    , doBuild
     , Timeout (Timeout)
+    , doBuild
     , uploadCoverageIfBors
     )
 import BuildArgs
