@@ -2,6 +2,11 @@
 
 A library and CLI for manipulating data intended for the [Cardano Token Registry](https://github.com/cardano-foundation/cardano-token-registry). See the link for more information about the Metadata Registry itself.
 
+## Deprecation Notice
+
+:warning: **cardano-metadata-submitter is now DEPRECATED. It has been renamed to `token-metadata-creator` and can be found in the `offchain-metadata-tools` project** :warning:
+https://github.com/input-output-hk/offchain-metadata-tools/tree/master/token-metadata-creator
+
 ## How to use
 
 > :package: [Download pre-compiled linux executable](https://hydra.iohk.io/job/Cardano/cardano-metadata-submitter/native.metadataSubmitterTarball.x86_64-linux/latest-finished) or see instructions below to [:hammer: build from source](#how-to-build).
